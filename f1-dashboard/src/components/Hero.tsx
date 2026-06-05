@@ -52,8 +52,8 @@ export default function Hero() {
         <iframe 
           width="100%" 
           height="100%" 
-          src="https://www.youtube.com/embed/live_stream?channel=UCYOURCHANNELIDHERE" 
-          title="YouTube live video player" 
+          src="https://www.youtube.com/embed/videoseries?list=UUBxy9XHe5viBqq6Rh3PE9Sw" 
+          title="YouTube video player" 
           frameBorder="0" 
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
           allowFullScreen>
