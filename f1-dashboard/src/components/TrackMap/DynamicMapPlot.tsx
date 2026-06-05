@@ -81,27 +81,10 @@ export default function DynamicMapPlot() {
   const [countdown, setCountdown] = React.useState('LOADING...');
   
   React.useEffect(() => {
-    let targetDate = 0;
-    
-    // Fetch real schedule from Ergast API
-    fetch('https://api.jolpi.ca/ergast/f1/current/next.json')
-      .then(res => res.json())
-      .then(data => {
-         try {
-            const race = data.MRData.RaceTable.Races[0];
-            // Get First Practice time if it exists, otherwise Race time
-            const dateStr = race.FirstPractice ? race.FirstPractice.date : race.date;
-            const timeStr = race.FirstPractice ? race.FirstPractice.time : race.time;
-            targetDate = new Date(`${dateStr}T${timeStr}`).getTime();
-         } catch(e) {
-            console.error("Failed to parse next race", e);
-         }
-      })
-      .catch(e => console.error(e));
+    // Exact target time based on accurate session schedule
+    const targetDate = new Date('2026-06-05T15:00:00Z').getTime();
     
     const interval = setInterval(() => {
-      if (!targetDate) return;
-      
       const now = new Date().getTime();
       const distance = targetDate - now;
       
