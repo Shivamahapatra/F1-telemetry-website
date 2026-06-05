@@ -383,6 +383,21 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
                 else:
                     team_radio.append({"time": time_str, "driver": "RACE CONTROL", "text": text, "color": "#0090FF"})
                     
+        # Parse Weather Data
+        weather_list = []
+        weather_df = session.weather_data
+        if weather_df is not None and not weather_df.empty:
+            for _, w_row in weather_df.iterrows():
+                weather_list.append({
+                    "airTemp": float(w_row.get("AirTemp", 21.0)) if pd.notnull(w_row.get("AirTemp")) else 21.0,
+                    "trackTemp": float(w_row.get("TrackTemp", 30.0)) if pd.notnull(w_row.get("TrackTemp")) else 30.0,
+                    "humidity": float(w_row.get("Humidity", 50.0)) if pd.notnull(w_row.get("Humidity")) else 50.0,
+                    "windSpeed": float(w_row.get("WindSpeed", 5.0)) if pd.notnull(w_row.get("WindSpeed")) else 5.0,
+                    "rainfall": bool(w_row.get("Rainfall", False)) if pd.notnull(w_row.get("Rainfall")) else False
+                })
+        else:
+            weather_list = [{"airTemp": 21.5, "trackTemp": 31.0, "humidity": 55.0, "windSpeed": 4.5, "rainfall": False}]
+            
         total_laps = session.total_laps if session.total_laps else 30
         
     except Exception as e:
@@ -392,6 +407,7 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
         driver_colors = {}
         race_control = []
         team_radio = []
+        weather_list = [{"airTemp": 21.5, "trackTemp": 31.0, "humidity": 55.0, "windSpeed": 4.5, "rainfall": False}]
         total_laps = 70
 
     while True:
@@ -407,6 +423,15 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
                 }
             }
             websockets.broadcast(connected_clients, json.dumps(session_info))
+
+            if weather_list:
+                # Cycle weather or pick based on the first driver's lap count
+                w_idx = min(sim_state[drivers[0]]["lap_count"], len(weather_list) - 1)
+                w_data = weather_list[w_idx]
+                websockets.broadcast(connected_clients, json.dumps({
+                    "topic": "WeatherData",
+                    "data": w_data
+                }))
 
             for drv in drivers:
                 state = sim_state[drv]
@@ -470,7 +495,7 @@ async def fastf1_live_bridge():
     if session:
         try:
             logging.info(f"Loading track map for {gp} {year} {sess_name}...")
-            await asyncio.to_thread(session.load, telemetry=True, weather=False, messages=True)
+            await asyncio.to_thread(session.load, telemetry=True, weather=True, messages=True)
             
             lap = session.laps.pick_fastest()
             tel = lap.get_telemetry()
