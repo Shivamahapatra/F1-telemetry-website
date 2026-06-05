@@ -5,16 +5,86 @@ import logging
 import os
 import math
 import time
+import pandas as pd
+import fastf1
 from fastf1.livetiming.client import SignalRClient
 
 logging.basicConfig(level=logging.INFO)
 connected_clients = set()
 
+# Setup FastF1 Cache
+if not os.path.exists("fastf1_cache"):
+    os.makedirs("fastf1_cache")
+fastf1.Cache.enable_cache("fastf1_cache")
+
+def fetch_laptimes_sync(year, gp, session_type):
+    session = fastf1.get_session(year, gp, session_type)
+    session.load(telemetry=False, weather=False, messages=False)
+    laps = session.laps
+    results = []
+    for index, row in laps.iterrows():
+        if pd.notnull(row['LapTime']):
+            results.append({
+                "Driver": row['Driver'],
+                "LapNumber": row['LapNumber'],
+                "LapTime": row['LapTime'].total_seconds()
+            })
+    return results
+
+async def handle_get_laptimes(websocket, req):
+    year = req.get("year", 2023)
+    gp = req.get("gp", "Monaco")
+    sess = req.get("session", "R")
+    try:
+        results = await asyncio.to_thread(fetch_laptimes_sync, year, gp, sess)
+        await websocket.send(json.dumps({"topic": "LaptimesData", "data": results}))
+    except Exception as e:
+        await websocket.send(json.dumps({"topic": "Error", "data": str(e)}))
+
+def fetch_telemetry_sync(year, gp, session_type, driver):
+    session = fastf1.get_session(year, gp, session_type)
+    session.load(telemetry=True, weather=False, messages=False)
+    laps = session.laps.pick_driver(driver)
+    fastest = laps.pick_fastest()
+    if pd.isnull(fastest['LapTime']):
+        return []
+    tel = fastest.get_telemetry()
+    results = []
+    for index, row in tel.iterrows():
+        results.append({
+            "Distance": row['Distance'],
+            "Speed": row['Speed'],
+            "Throttle": row['Throttle'],
+            "Brake": bool(row['Brake']),
+            "nGear": row['nGear']
+        })
+    return results
+
+async def handle_get_telemetry(websocket, req):
+    year = req.get("year", 2023)
+    gp = req.get("gp", "Monaco")
+    sess = req.get("session", "Q")
+    driver = req.get("driver", "VER")
+    try:
+        results = await asyncio.to_thread(fetch_telemetry_sync, year, gp, sess, driver)
+        await websocket.send(json.dumps({"topic": "TelemetryData", "data": results, "driver": driver}))
+    except Exception as e:
+        await websocket.send(json.dumps({"topic": "Error", "data": str(e)}))
+
+
 async def handler(websocket):
     connected_clients.add(websocket)
     logging.info("New frontend client connected!")
     try:
-        await websocket.wait_closed()
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                if data.get("action") == "get_laptimes":
+                    asyncio.create_task(handle_get_laptimes(websocket, data))
+                elif data.get("action") == "get_telemetry":
+                    asyncio.create_task(handle_get_telemetry(websocket, data))
+            except json.JSONDecodeError:
+                pass
     finally:
         connected_clients.remove(websocket)
 
@@ -66,11 +136,14 @@ async def fastf1_live_bridge():
     logging.info("Attempting to connect to real FastF1 SignalR Live Timing...")
     try:
         client = SignalRClient(filename)
-        # Uncomment in production during a live session:
-        # await client.start()
-        # asyncio.create_task(tail_file_and_broadcast(filename))
+        # Start the real connection to F1 servers
+        await client.start()
+        asyncio.create_task(tail_file_and_broadcast(filename))
         
-        raise Exception("No active F1 session to connect to right now.")
+        # Keep the connection alive
+        while True:
+            await asyncio.sleep(1)
+            
     except Exception as e:
         logging.warning(f"FastF1 connection failed/skipped: {e}. Falling back to simulation loop.")
         await simulate_live_stream()

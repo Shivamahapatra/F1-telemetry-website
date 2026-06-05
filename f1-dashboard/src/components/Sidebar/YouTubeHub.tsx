@@ -3,7 +3,7 @@ import React from 'react';
 
 export default function YouTubeHub() {
   const channelLink = "https://www.youtube.com/@manjaniumonsofts67?sub_confirmation=1";
-  const playlistUrl = "https://www.youtube.com/embed/videoseries?list=UUBxy9XHe5viBqq6Rh3PE9Sw";
+  const playlistUrl = "https://www.youtube.com/embed/4LaFsg9s7dM";
 
   return (
     <div className="p-6 border-t border-slate-800/50 bg-[#0A0D14]/50 flex flex-col gap-4">
