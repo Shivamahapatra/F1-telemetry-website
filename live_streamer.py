@@ -127,8 +127,8 @@ CAR_TO_DRIVER = {
     "20": "MAG", "27": "HUL"
 }
 
-async def tail_file_and_broadcast(filename):
-    """Asynchronously tails the file and broadcasts parsed JSON to clients."""
+async def tail_file_and_broadcast(filename, replay_mode=False):
+    """Asynchronously tails or replays the file and broadcasts parsed JSON to clients."""
     driver_state = {}
     
     with open(filename, 'r') as f:
@@ -136,8 +136,14 @@ async def tail_file_and_broadcast(filename):
         while True:
             line = f.readline()
             if not line:
-                await asyncio.sleep(0.1)
-                continue
+                if replay_mode:
+                    f.seek(0)
+                    driver_state.clear()
+                    await asyncio.sleep(2)
+                    continue
+                else:
+                    await asyncio.sleep(0.1)
+                    continue
             
             try:
                 data = json.loads(line)
@@ -197,6 +203,7 @@ async def tail_file_and_broadcast(filename):
                             "data": { "driver": drv, "x": p.get("X"), "y": p.get("Y") }
                         }
                         websockets.broadcast(connected_clients, json.dumps(broadcast_data))
+                        websockets.broadcast(connected_clients, json.dumps(broadcast_data))
                         
                 elif topic == "Streaming" and msg.get("SessionInfo"):
                     session = msg["SessionInfo"]
@@ -210,6 +217,11 @@ async def tail_file_and_broadcast(filename):
                         }
                     }
                     websockets.broadcast(connected_clients, json.dumps(broadcast_data))
+                
+                # Add a small delay in replay mode to avoid broadcasting thousands of messages per second
+                if replay_mode:
+                    await asyncio.sleep(0.01)
+
             except json.JSONDecodeError:
                 pass
             except Exception as e:
@@ -307,8 +319,9 @@ async def simulate_live_stream(race_name, track_map_coords):
 async def fastf1_live_bridge():
     global global_track_map
     filename = 'live_timing_data.txt'
-    if os.path.exists(filename):
-        os.remove(filename)
+    # DO NOT remove filename! We want to keep it to replay if we go offline.
+    # if os.path.exists(filename):
+    #     os.remove(filename)
 
     logging.info("Attempting to connect to real FastF1 SignalR Live Timing...")
     race_name = get_upcoming_race()
@@ -337,7 +350,18 @@ async def fastf1_live_bridge():
         
         await asyncio.sleep(10)
         
-        if not t.is_alive() or (os.path.exists(filename) and os.path.getsize(filename) == 0):
+        if t.is_alive() and os.path.exists(filename) and os.path.getsize(filename) > 0:
+            logging.info("Live feed active! Streaming real-time data...")
+            tail_task = asyncio.create_task(tail_file_and_broadcast(filename, replay_mode=False))
+            while t.is_alive():
+                await asyncio.sleep(1)
+            logging.warning("Live feed went offline! Switching to replay mode.")
+            tail_task.cancel()
+            
+        if os.path.exists(filename) and os.path.getsize(filename) > 0:
+            logging.info("Replaying the live timing data recorded before going offline...")
+            asyncio.create_task(tail_file_and_broadcast(filename, replay_mode=True))
+        else:
             logging.warning("FastF1 connected but receiving 0 bytes. Falling back to 2025 replay.")
             asyncio.create_task(simulate_live_stream(race_name, global_track_map))
     except Exception as e:
