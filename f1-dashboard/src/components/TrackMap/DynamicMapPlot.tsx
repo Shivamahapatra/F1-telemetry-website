@@ -66,14 +66,17 @@ export default function DynamicMapPlot() {
       showgrid: false, 
       zeroline: false, 
       showticklabels: false,
-      range: [-10000, 10000] 
+      autorange: true,
+      fixedrange: false
     },
     yaxis: { 
       showgrid: false, 
       zeroline: false, 
       showticklabels: false,
       scaleanchor: 'x', 
-      range: [-10000, 10000]
+      scaleratio: 1,
+      autorange: true,
+      fixedrange: false
     },
     dragmode: 'pan',
   };

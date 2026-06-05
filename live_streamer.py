@@ -21,20 +21,27 @@ if not os.path.exists("fastf1_cache"):
 fastf1.Cache.enable_cache("fastf1_cache")
 
 def get_upcoming_race():
-    """Fetches the upcoming race data from Ergast API."""
+    """Fetches the upcoming race data from FastF1."""
     try:
-        url = "https://api.jolpi.ca/ergast/f1/current/next.json"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            races = data.get('MRData', {}).get('RaceTable', {}).get('Races', [])
-            if races:
-                race_name = races[0].get('raceName', 'Formula 1 Grand Prix')
-                logging.info(f"Upcoming race found: {race_name}")
-                return race_name
+        year = datetime.datetime.utcnow().year
+        schedule = fastf1.get_event_schedule(year)
+        now = pd.Timestamp(datetime.datetime.utcnow())
+        upcoming = schedule[schedule['EventDate'] >= now]
+        if not upcoming.empty:
+            race_name = upcoming.iloc[0]['EventName']
+            logging.info(f"Upcoming race found: {race_name}")
+            return race_name
     except Exception as e:
-        logging.error(f"Error fetching upcoming race data from Ergast: {e}")
-    return "Formula 1 Grand Prix"
+        logging.error(f"Error fetching upcoming race data from FastF1: {e}")
+    return "Canadian Grand Prix"
+
+def generate_fallback_circle():
+    """Generates a simple circle if the real track map fails to load, preventing 0-length bugs."""
+    coords = []
+    for i in range(100):
+        angle = (i / 100.0) * math.pi * 2
+        coords.append({"x": math.cos(angle) * 5000, "y": math.sin(angle) * 5000})
+    return coords
 
 def fetch_laptimes_sync(year, gp, session_type):
     session = fastf1.get_session(year, gp, session_type)
@@ -341,6 +348,8 @@ async def fastf1_live_bridge():
             logging.info(f"Loaded {len(track_map_coords)} track coordinates.")
         except Exception as e:
             logging.error(f"Error loading track map: {e}")
+            track_map_coords = generate_fallback_circle()
+            logging.info("Using fallback circle map.")
 
     try:
         t = threading.Thread(target=_run_fastf1_client_thread, args=(filename,))
