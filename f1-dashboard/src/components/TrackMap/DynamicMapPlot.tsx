@@ -122,6 +122,4 @@ export default function DynamicMapPlot() {
       </div>
     </div>
   );
-    </div>
-  );
 }
