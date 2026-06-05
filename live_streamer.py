@@ -329,9 +329,9 @@ async def fastf1_live_bridge():
     track_map_coords = []
     if race_name:
         try:
-            logging.info(f"Loading track map for {race_name}...")
-            year = datetime.datetime.utcnow().year
-            session = fastf1.get_session(year, race_name, "Q")
+            logging.info(f"Loading track map for {race_name} (using last year's race data)...")
+            year = datetime.datetime.utcnow().year - 1
+            session = fastf1.get_session(year, race_name, "R")
             session.load(telemetry=True, weather=False, messages=False)
             lap = session.laps.pick_fastest()
             tel = lap.get_telemetry()
