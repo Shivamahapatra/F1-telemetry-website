@@ -1,25 +1,35 @@
-import Hero from "@/components/Hero";
-import LiveLeaderboard from "@/components/LiveLeaderboard";
-import LiveTrackMap from "@/components/LiveTrackMap";
-import LiveTelemetryCharts from "@/components/LiveTelemetryCharts";
+import LeftNavigation from "@/components/Sidebar/LeftNavigation";
+import YouTubeHub from "@/components/Sidebar/YouTubeHub";
+import TopWeatherBar from "@/components/Header/TopWeatherBar";
+import DynamicMapPlot from "@/components/TrackMap/DynamicMapPlot";
+import LiveTimingSidebar from "@/components/TimingTower/LiveTimingSidebar";
 
 export default function Home() {
   return (
-    <main className="min-h-screen pb-10 flex flex-col gap-6 max-w-[1600px] mx-auto bg-slate-950">
-      {/* Top: YouTube Hub Hero Section */}
-      <Hero />
+    <main className="h-screen w-screen overflow-hidden bg-[#0A0D14] text-white">
+      <div className="grid grid-cols-[15%_60%_25%] grid-rows-[auto_1fr] h-full">
+        
+        {/* Left Sidebar spans both rows */}
+        <div className="row-span-2 border-r border-slate-800/50 flex flex-col bg-[#0F131D]">
+          <LeftNavigation />
+          <YouTubeHub />
+        </div>
 
-      <div className="px-4 md:px-8 flex flex-col gap-8">
-        {/* Middle: Live Timing & Track Map */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <LiveLeaderboard />
-          <LiveTrackMap />
-        </section>
+        {/* Top Header spans only the middle column */}
+        <div className="col-start-2 row-start-1 border-b border-slate-800/50 bg-[#0F131D]">
+          <TopWeatherBar />
+        </div>
 
-        {/* Bottom: Live Telemetry Charts */}
-        <section className="w-full">
-          <LiveTelemetryCharts />
-        </section>
+        {/* Track Map takes the rest of the middle column */}
+        <div className="col-start-2 row-start-2 relative p-4 overflow-hidden">
+          <DynamicMapPlot />
+        </div>
+
+        {/* Timing Tower spans both rows on the right */}
+        <div className="col-start-3 row-span-2 row-start-1 border-l border-slate-800/50 bg-[#0F131D]">
+          <LiveTimingSidebar />
+        </div>
+
       </div>
     </main>
   );

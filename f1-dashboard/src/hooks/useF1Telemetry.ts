@@ -3,9 +3,10 @@ import { useState, useEffect, useRef } from 'react';
 export function useF1Telemetry() {
   const [timingData, setTimingData] = useState<any[]>([]);
   const [trackPositions, setTrackPositions] = useState<Record<string, any>>({});
+  const [sessionInfo, setSessionInfo] = useState<any>({});
+  const [weatherData, setWeatherData] = useState<any>({});
   
   const [selectedDrivers, setSelectedDrivers] = useState<string[]>(['VER', 'HAM']);
-  // Ref to avoid reconnecting WS when selection changes
   const selectedDriversRef = useRef<string[]>(['VER', 'HAM']);
   
   useEffect(() => {
@@ -16,8 +17,9 @@ export function useF1Telemetry() {
   const [telemetryState, setTelemetryState] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
-    // Connect securely to the Render cloud backend
     const ws = new WebSocket('wss://f1-telemetry-website.onrender.com');
+    // Fallback for local testing if needed
+    // const ws = new WebSocket('ws://localhost:8765');
     
     ws.onmessage = (event) => {
       try {
@@ -37,6 +39,12 @@ export function useF1Telemetry() {
             ...prev,
             [message.data.driver]: message.data
           }));
+        }
+        else if (message.topic === 'SessionInfo') {
+          setSessionInfo(message.data);
+        }
+        else if (message.topic === 'WeatherData') {
+          setWeatherData(message.data);
         }
         else if (message.topic === 'Telemetry') {
           const driver = message.data.driver;
@@ -68,7 +76,7 @@ export function useF1Telemetry() {
       ws.close();
       clearInterval(interval);
     };
-  }, []); // Only run once on mount
+  }, []);
 
-  return { timingData, telemetryState, trackPositions, selectedDrivers, setSelectedDrivers };
+  return { timingData, telemetryState, trackPositions, sessionInfo, weatherData, selectedDrivers, setSelectedDrivers };
 }

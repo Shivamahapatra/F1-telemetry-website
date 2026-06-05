@@ -93,6 +93,30 @@ async def simulate_live_stream():
         current_time = time.time() - start_time
         
         if connected_clients:
+            # Session & Weather Data
+            session_data = {
+                "topic": "SessionInfo",
+                "data": {
+                    "name": "FORMULA 1 LENOVO GRAND PRIX DU CANADA 2026",
+                    "status": "Green",
+                    "lap": int(current_time / 60) + 1,
+                    "totalLaps": 68
+                }
+            }
+            websockets.broadcast(connected_clients, json.dumps(session_data))
+
+            weather_data = {
+                "topic": "WeatherData",
+                "data": {
+                    "airTemp": 22.5 + math.sin(current_time * 0.1),
+                    "trackTemp": 34.2 + math.sin(current_time * 0.05) * 2,
+                    "humidity": 45,
+                    "windSpeed": 12,
+                    "rainfall": False
+                }
+            }
+            websockets.broadcast(connected_clients, json.dumps(weather_data))
+            
             # Timing Data
             for i, drv in enumerate(drivers):
                 simulated_timing = {
