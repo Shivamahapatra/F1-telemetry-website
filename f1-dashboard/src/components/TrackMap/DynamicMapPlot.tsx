@@ -134,7 +134,7 @@ export default function DynamicMapPlot() {
                         Montreal <span className="font-mono text-green-400">00:00:00</span>
                     </div>
                     <div className="ml-auto text-xs font-mono font-bold text-[var(--color-neon-red)] bg-red-900/20 px-3 py-1 rounded border border-red-800">
-                        OFFLINE IN: {countdown}
+                        SESSION STARTS IN: {countdown}
                     </div>
                 </div>
             </div>
