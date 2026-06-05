@@ -1,27 +1,79 @@
 "use client";
+import React from 'react';
+import dynamic from 'next/dynamic';
 import { useF1Telemetry } from "@/hooks/useF1Telemetry";
 
+const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+
 const teamColors: Record<string, string> = {
-  VER: "#3671C6", HAM: "#E80020", LEC: "#E80020", NOR: "#FF8000", PIA: "#FF8000", RUS: "#27F4D2", ALO: "#229971"
+  VER: "#3671C6", PER: "#3671C6",
+  HAM: "#E80020", LEC: "#E80020", SAI: "#E80020",
+  NOR: "#FF8000", PIA: "#FF8000", 
+  RUS: "#27F4D2", 
+  ALO: "#229971", STR: "#229971",
+  GAS: "#0090FF", OCO: "#0090FF",
+  ALB: "#005AFF", SAR: "#005AFF",
+  BOT: "#52E252", ZHO: "#52E252",
+  MAG: "#FFFFFF", HUL: "#FFFFFF",
+  TSU: "#6692FF", RIC: "#6692FF"
 };
 
 export default function LiveTrackMap() {
   const { trackPositions, selectedDrivers } = useF1Telemetry();
 
-  // Mapping minisectors (1-10)
-  const minisectorMap: Record<number, {x: number, y: number}> = {
-    1: {x: 50, y: 100}, 2: {x: 30, y: 80}, 3: {x: 30, y: 60}, 4: {x: 50, y: 50}, 
-    5: {x: 100, y: 50}, 6: {x: 150, y: 50}, 7: {x: 170, y: 60}, 8: {x: 170, y: 80}, 
-    9: {x: 150, y: 100}, 10: {x: 100, y: 100}
-  };
+  const plotData = selectedDrivers.map(drv => {
+    const pos = trackPositions[drv];
+    const color = teamColors[drv] || "#ffffff";
+    
+    // If no position data yet, place them out of bounds or origin transparently
+    const x = pos?.x ?? 0;
+    const y = pos?.y ?? 0;
+    const opacity = pos?.x !== undefined ? 1 : 0;
 
-  const getPosition = (driverData: any) => {
-    if (!driverData) return { x: 0, y: 0, opacity: 0 };
-    if (driverData.x && driverData.y) return { x: driverData.x, y: driverData.y, opacity: 1 };
-    if (driverData.minisector && minisectorMap[driverData.minisector]) {
-      return { ...minisectorMap[driverData.minisector], opacity: 1 };
-    }
-    return { x: 0, y: 0, opacity: 0 };
+    return {
+      x: [x],
+      y: [y],
+      type: 'scatter',
+      mode: 'markers+text',
+      name: drv,
+      text: [drv],
+      textposition: 'top center',
+      marker: { 
+        color: color, 
+        size: 12,
+        line: { color: '#ffffff', width: 1 }
+      },
+      textfont: {
+        family: 'var(--font-sans)',
+        size: 10,
+        color: '#ffffff'
+      },
+      opacity: opacity,
+      hoverinfo: 'name'
+    };
+  });
+
+  const layout = {
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    margin: { t: 10, r: 10, l: 10, b: 10 },
+    showlegend: false,
+    xaxis: { 
+      showgrid: false, 
+      zeroline: false, 
+      showticklabels: false,
+      // Fixed range so the map doesn't jitter as cars move
+      range: [-600, 600] 
+    },
+    yaxis: { 
+      showgrid: false, 
+      zeroline: false, 
+      showticklabels: false,
+      scaleanchor: 'x', 
+      scaleratio: 1,
+      range: [-300, 300]
+    },
+    dragmode: 'pan',
   };
 
   return (
@@ -29,26 +81,16 @@ export default function LiveTrackMap() {
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold text-white uppercase tracking-wider">Live Track Position</h2>
       </div>
-      <div className="flex-1 flex items-center justify-center p-4 relative min-h-[250px]">
-        <svg viewBox="0 0 200 150" className="w-full h-full drop-shadow-[0_0_15px_rgba(255,255,255,0.1)]">
-          {/* Track Shape */}
-          <path d="M 50 100 C 20 100 20 50 50 50 L 150 50 C 180 50 180 100 150 100 Z" fill="none" stroke="#334155" strokeWidth="8" strokeLinecap="round" />
-          
-          {/* Dynamic Cars based on Selection */}
-          {selectedDrivers.map((drv) => {
-            const pos = getPosition(trackPositions[drv]);
-            const color = teamColors[drv] || "#ffffff";
-            return (
-              <g key={drv} style={{ transition: 'all 0.5s ease-in-out', opacity: pos.opacity }}>
-                <circle 
-                  cx={pos.x} cy={pos.y} r="4" fill={color} 
-                  style={{ filter: `drop-shadow(0px 0px 8px ${color})` }} 
-                />
-                <text x={pos.x - 8} y={pos.y - 8} fill="white" fontSize="6" fontWeight="bold">{drv}</text>
-              </g>
-            );
-          })}
-        </svg>
+      <div className="flex-1 w-full relative min-h-[350px]">
+        <div className="absolute inset-0">
+          <Plot
+            data={plotData as any}
+            layout={layout as any}
+            config={{ responsive: true, displayModeBar: false }}
+            style={{ width: '100%', height: '100%' }}
+            useResizeHandler={true}
+          />
+        </div>
       </div>
     </div>
   );

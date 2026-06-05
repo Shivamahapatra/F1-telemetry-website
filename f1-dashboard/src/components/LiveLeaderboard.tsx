@@ -17,10 +17,10 @@ export default function LiveLeaderboard() {
   const { timingData } = useF1Telemetry();
 
   return (
-    <div className="glass-panel p-4 rounded-2xl h-full flex flex-col w-full overflow-x-auto shadow-lg">
+    <div className="glass-panel p-4 rounded-2xl h-full flex flex-col w-full overflow-hidden shadow-lg">
       <h2 className="text-xl font-bold text-white mb-4 uppercase tracking-wider sticky left-0">Live Timing Tower</h2>
-      <div className="min-w-[600px]">
-        <div className="grid grid-cols-8 gap-2 text-xs font-bold text-slate-400 uppercase border-b border-slate-700 pb-2 mb-2">
+      <div className="overflow-x-auto overflow-y-auto max-h-[500px] custom-scrollbar">
+        <div className="grid grid-cols-8 gap-2 text-xs font-bold text-slate-400 uppercase border-b border-slate-700 pb-2 mb-2 sticky top-0 bg-slate-900/80 backdrop-blur-sm z-10">
           <div>POS</div>
           <div>Driver</div>
           <div>Lap</div>
