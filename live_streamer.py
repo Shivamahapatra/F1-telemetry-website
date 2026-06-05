@@ -294,6 +294,8 @@ async def simulate_live_stream():
                         "driver": drv,
                         "position": i + 1,
                         "lap": int(current_time / 60) + 1,
+                        "bestLap": f"1:13.{900 + i*10:03d}",
+                        "lastLap": f"1:14.{100 + i*10 + int(math.sin(current_time)*10):03d}" if not is_pit else "",
                         "s1": f"28.{532 + i*10 + int(math.sin(current_time)*10):03d}" if not is_pit else "",
                         "s2": f"30.{111 + i*5 + int(math.cos(current_time)*5):03d}" if not is_pit else "",
                         "s3": f"24.{992 + i*2 + int(math.sin(current_time*2)*2):03d}" if not is_pit else "",
