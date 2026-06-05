@@ -72,7 +72,7 @@ export default function RaceResultsView() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#0A0D14] p-8 overflow-x-auto">
+    <div className="flex flex-col h-full w-full bg-[#0A0D14] p-4 lg:p-8 overflow-x-auto">
       <div className="flex justify-between items-center mb-8">
         <h2 className="text-2xl font-bold">Race Results Heatmap</h2>
         <div className="text-right">

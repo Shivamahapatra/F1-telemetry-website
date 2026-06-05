@@ -49,10 +49,10 @@ export default function CalendarView() {
   }
 
   return (
-    <div className="flex h-full w-full">
+    <div className="flex flex-col-reverse lg:flex-row h-full w-full overflow-y-auto lg:overflow-hidden">
       {/* Left Panel: Race List */}
-      <div className="w-[35%] h-full border-r border-slate-800 flex flex-col bg-[#0A0D14]">
-        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-[#0F131D]">
+      <div className="w-full lg:w-[35%] shrink-0 h-auto lg:h-full lg:border-r border-slate-800 flex flex-col bg-[#0A0D14]">
+        <div className="p-4 border-b border-t lg:border-t-0 border-slate-800 flex justify-between items-center bg-[#0F131D]">
           <h2 className="text-xl font-bold">GP Calendar</h2>
           <div className="text-right">
             <div className="text-xs text-[var(--color-neon-red)] font-bold uppercase tracking-widest animate-pulse">Live API Connected</div>
@@ -60,7 +60,7 @@ export default function CalendarView() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 overflow-y-visible lg:overflow-y-auto custom-scrollbar">
           {races.map((r, i) => {
             const status = getStatus(r.date);
             return (
@@ -101,16 +101,16 @@ export default function CalendarView() {
 
       {/* Right Panel: Grand Prix Details */}
       {selectedRace && (
-        <div className="w-[65%] h-full flex flex-col bg-[#0F131D] overflow-y-auto custom-scrollbar p-8 gap-8">
+        <div className="w-full lg:w-[65%] h-auto lg:h-full flex flex-col bg-[#0F131D] overflow-y-visible lg:overflow-y-auto custom-scrollbar p-4 lg:p-8 gap-4 lg:gap-8">
           <div>
-            <h1 className="text-3xl font-black uppercase tracking-wider text-white">{selectedRace.season} {selectedRace.raceName}</h1>
-            <div className="flex justify-between items-center mt-2 text-slate-400 text-sm font-bold">
-              <span>{formatTime(selectedRace.date, selectedRace.time)}</span>
+            <h1 className="text-2xl lg:text-3xl font-black uppercase tracking-wider text-white leading-tight">{selectedRace.season} {selectedRace.raceName}</h1>
+            <div className="flex flex-col lg:flex-row justify-between lg:items-center mt-2 text-slate-400 text-xs lg:text-sm font-bold gap-2">
+              <span className="text-blue-400">{formatTime(selectedRace.date, selectedRace.time)}</span>
               <span>{selectedRace.Circuit.Location.locality} / {selectedRace.Circuit.Location.country} / {selectedRace.Circuit.circuitName}</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-[45%_55%] gap-8">
+          <div className="flex flex-col lg:grid lg:grid-cols-[45%_55%] gap-8">
             {/* Session Schedules */}
             <div>
               <h3 className="text-lg font-bold text-white mb-4">Session Schedules</h3>
@@ -134,7 +134,7 @@ export default function CalendarView() {
               </div>
 
               <div className="mt-8 bg-[#0A0D14] rounded-xl border border-slate-800 p-4 aspect-video flex items-center justify-center">
-                <div className="text-slate-600 text-sm font-bold tracking-widest uppercase flex flex-col items-center gap-2">
+                <div className="text-slate-600 text-xs lg:text-sm font-bold tracking-widest uppercase flex flex-col items-center gap-2 text-center">
                   <span className="text-3xl">🗺️</span>
                   Circuit Map Data Coming Soon
                 </div>

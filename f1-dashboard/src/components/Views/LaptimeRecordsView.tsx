@@ -101,13 +101,13 @@ export default function LaptimeRecordsView() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#0A0D14] p-8 overflow-y-auto custom-scrollbar">
+    <div className="flex flex-col h-full w-full bg-[#0A0D14] p-4 lg:p-8 overflow-y-auto custom-scrollbar">
       <div className="flex justify-between items-center mb-8">
         <h2 className="text-2xl font-bold">Lap Records</h2>
       </div>
 
       {/* Line Chart */}
-      <div className="w-full h-[400px] bg-[#0F131D] border border-slate-800 rounded-xl p-4 mb-8 relative">
+      <div className="w-full h-[300px] lg:h-[400px] bg-[#0F131D] border border-slate-800 rounded-xl p-4 mb-8 relative">
         <h3 className="text-sm font-bold text-slate-400 absolute top-4 left-4 z-10">Laptime Evolution</h3>
         <Plot
           data={lineData as any}
@@ -118,7 +118,7 @@ export default function LaptimeRecordsView() {
         />
       </div>
 
-      <div className="grid grid-cols-[2fr_1fr] gap-8">
+      <div className="flex flex-col lg:grid lg:grid-cols-[2fr_1fr] gap-4 lg:gap-8">
         {/* Box Plots (Mock representation) */}
         <div className="bg-[#0F131D] border border-slate-800 rounded-xl p-4 h-[300px] flex items-center justify-center text-slate-500">
           <div className="flex flex-col items-center gap-2">

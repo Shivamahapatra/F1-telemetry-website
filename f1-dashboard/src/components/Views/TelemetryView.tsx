@@ -89,10 +89,10 @@ export default function TelemetryView() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#0A0D14] p-8 overflow-y-auto custom-scrollbar">
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Fastest Lap Telemetry</h2>
-        <div className="flex items-center gap-4">
+    <div className="flex flex-col h-full w-full bg-[#0A0D14] p-4 lg:p-8 overflow-y-auto custom-scrollbar">
+      <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4 mb-8">
+        <h2 className="text-xl lg:text-2xl font-bold text-white uppercase tracking-wider">Fastest Lap Telemetry</h2>
+        <div className="flex flex-col lg:flex-row lg:items-center gap-4">
             <select 
               value={driver} 
               onChange={e => setDriver(e.target.value)}

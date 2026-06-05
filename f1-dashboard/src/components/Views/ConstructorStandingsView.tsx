@@ -51,25 +51,27 @@ export default function ConstructorStandingsView() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-2 max-w-4xl mx-auto w-full pb-16">
-        <div className="grid grid-cols-[80px_1fr_100px_100px] gap-4 px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800">
-          <div className="text-center">Pos</div>
-          <div>Constructor</div>
-          <div className="text-center">Wins</div>
-          <div className="text-right">Points</div>
-        </div>
-
-        {standings.map((s, i) => (
-          <div key={i} className={`grid grid-cols-[80px_1fr_100px_100px] gap-4 items-center px-6 py-4 bg-[#0F131D] rounded-xl border-l-4 ${getTeamColor(s.Constructor.name)} hover:bg-slate-800/50 transition-colors shadow-lg`}>
-            <div className="text-3xl font-black text-slate-400 text-center">{s.position}</div>
-            <div>
-              <div className="text-xl font-black text-white uppercase tracking-wider">{s.Constructor.name}</div>
-              <div className="text-xs font-bold text-slate-500 mt-1">{s.Constructor.nationality}</div>
-            </div>
-            <div className="text-center font-mono text-slate-300">{s.wins}</div>
-            <div className="text-right text-3xl font-black text-[var(--color-neon-red)]">{s.points}</div>
+      <div className="flex-1 w-full overflow-x-auto custom-scrollbar pb-16">
+        <div className="flex flex-col gap-2 mx-auto w-full min-w-[600px] lg:max-w-4xl">
+          <div className="grid grid-cols-[80px_1fr_100px_100px] gap-4 px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800">
+            <div className="text-center">Pos</div>
+            <div>Constructor</div>
+            <div className="text-center">Wins</div>
+            <div className="text-right">Points</div>
           </div>
-        ))}
+
+          {standings.map((s, i) => (
+            <div key={i} className={`grid grid-cols-[80px_1fr_100px_100px] gap-4 items-center px-6 py-4 bg-[#0F131D] rounded-xl border-l-4 ${getTeamColor(s.Constructor.name)} hover:bg-slate-800/50 transition-colors shadow-lg`}>
+              <div className="text-2xl lg:text-3xl font-black text-slate-400 text-center">{s.position}</div>
+              <div>
+                <div className="text-lg lg:text-xl font-black text-white uppercase tracking-wider">{s.Constructor.name}</div>
+                <div className="text-[10px] lg:text-xs font-bold text-slate-500 mt-1">{s.Constructor.nationality}</div>
+              </div>
+              <div className="text-center font-mono text-slate-300 text-sm lg:text-base">{s.wins}</div>
+              <div className="text-right text-2xl lg:text-3xl font-black text-[var(--color-neon-red)]">{s.points}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

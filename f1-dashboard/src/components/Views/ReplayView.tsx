@@ -11,14 +11,14 @@ export default function ReplayView() {
   const [activeReplay, setActiveReplay] = useState(REPLAYS[0]);
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#0A0D14] p-8 overflow-y-auto custom-scrollbar">
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-3xl font-black italic tracking-tighter uppercase text-white flex items-center gap-2">
+    <div className="flex flex-col h-full w-full bg-[#0A0D14] p-4 lg:p-8 overflow-y-auto custom-scrollbar">
+      <div className="flex justify-between items-center mb-4 lg:mb-8">
+        <h2 className="text-2xl lg:text-3xl font-black italic tracking-tighter uppercase text-white flex items-center gap-2">
           <span className="text-[var(--color-neon-red)]">▶</span> RACE REPLAYS
         </h2>
       </div>
 
-      <div className="flex gap-8 max-w-6xl mx-auto w-full">
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-8 max-w-6xl mx-auto w-full">
         <div className="flex-1">
           <div className="w-full aspect-video bg-[#0F131D] rounded-xl overflow-hidden shadow-2xl border border-slate-800">
             <iframe
@@ -31,11 +31,11 @@ export default function ReplayView() {
               allowFullScreen
             ></iframe>
           </div>
-          <h3 className="text-2xl font-bold text-white mt-6">{activeReplay.title}</h3>
-          <p className="text-slate-500 font-bold tracking-widest text-sm uppercase mt-2">{activeReplay.date}</p>
+          <h3 className="text-xl lg:text-2xl font-bold text-white mt-4 lg:mt-6">{activeReplay.title}</h3>
+          <p className="text-slate-500 font-bold tracking-widest text-xs lg:text-sm uppercase mt-1 lg:mt-2">{activeReplay.date}</p>
         </div>
 
-        <div className="w-80 flex flex-col gap-4">
+        <div className="w-full lg:w-80 flex flex-col gap-4">
           <div className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Up Next</div>
           {REPLAYS.map(r => (
             <div 
