@@ -63,44 +63,11 @@ export default function LiveTimingSidebar() {
       {/* Driver List */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1 min-w-[600px]">
         {isOffline ? (
-            OFFLINE_STANDINGS.map((d) => (
-                <div key={d.driver} className="grid grid-cols-[20px_60px_1fr_1fr_1fr_2fr_40px] items-center gap-2 py-1 px-2 hover:bg-slate-800/50 rounded group">
-                  <span className="text-slate-500 font-bold text-xs">{d.pos}</span>
-                  <div className="flex items-center gap-2">
-                    <div className="w-[3px] h-4 rounded" style={{ backgroundColor: TEAM_COLORS[d.driver] || '#fff' }}></div>
-                    <span className="text-slate-300 font-bold tracking-wider">{d.driver}</span>
-                  </div>
-                  <span className="text-[var(--color-neon-green)] font-mono text-xs text-right font-bold">{d.best}</span>
-                  <div className="flex flex-col items-end leading-tight">
-                    <span className="text-white font-mono text-xs font-bold">{d.interval}</span>
-                    {d.pos > 1 && <span className="text-[10px] text-blue-400 font-mono">+{((Math.random() * 0.3) + parseFloat(d.interval.replace('+',''))).toFixed(3)}</span>}
-                  </div>
-                  <div className="text-center">
-                    <span className="bg-red-900/50 text-red-500 border border-red-800/50 px-2 py-0.5 rounded text-[10px] font-bold tracking-widest">{d.last}</span>
-                  </div>
-                  
-                  {/* Mini Sectors (Mock visual) */}
-                  <div className="flex flex-col items-center justify-center gap-1">
-                      <div className="flex gap-[2px]">
-                          {Array.from({length: 10}).map((_, i) => (
-                              <div key={i} className={`h-2 w-1.5 rounded-sm ${i < 3 ? 'bg-yellow-500' : i < 7 ? 'bg-green-500' : 'bg-purple-500'}`}></div>
-                          ))}
-                      </div>
-                      <div className="flex justify-between w-full px-2 text-[9px] text-yellow-500 font-mono font-bold">
-                          <span>{(23 + Math.random() * 2).toFixed(3)}</span>
-                          <span>{(38 + Math.random() * 3).toFixed(3)}</span>
-                      </div>
-                  </div>
-
-                  <div className="flex flex-col items-center justify-center gap-0.5">
-                      <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold border-2
-                        ${d.tire === 'S' ? 'border-red-500 text-red-500' : d.tire === 'M' ? 'border-yellow-500 text-yellow-500' : 'border-white text-white'}`}>
-                          {d.tire}
-                      </div>
-                      <span className="text-[9px] text-slate-500 font-mono">{d.age}L</span>
-                  </div>
-                </div>
-              ))
+            <div className="flex flex-col items-center justify-center h-full text-slate-500 py-10">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-500 mb-4"></div>
+                <p className="font-bold tracking-widest text-xs uppercase">Connecting to F1 Live Timing...</p>
+                <p className="text-[10px] mt-2 max-w-xs text-center">If the session is active, the leaderboard will populate as cars set new sector times.</p>
+            </div>
         ) : (
             timingData.map((d, i) => (
               <div key={d.driver} className="grid grid-cols-[20px_60px_1fr_1fr_1fr_2fr_40px] items-center gap-2 py-1 px-2 hover:bg-slate-800/50 rounded group">
