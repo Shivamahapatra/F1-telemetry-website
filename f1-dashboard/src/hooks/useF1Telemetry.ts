@@ -16,7 +16,8 @@ export function useF1Telemetry() {
   const [telemetryState, setTelemetryState] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8765');
+    // Connect securely to the Render cloud backend
+    const ws = new WebSocket('wss://f1-telemetry-website.onrender.com');
     
     ws.onmessage = (event) => {
       try {

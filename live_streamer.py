@@ -94,9 +94,11 @@ async def simulate_live_stream():
         lap += 1
 
 async def main():
-    # Start the server to allow Next.js to connect
-    server = await websockets.serve(handler, "localhost", 8765)
-    logging.info("WebSocket Server running on ws://localhost:8765")
+    # Get Render's dynamic port, or fallback to 8765 locally
+    port = int(os.environ.get("PORT", 8765))
+    # Must bind to 0.0.0.0 instead of localhost for cloud hosting!
+    server = await websockets.serve(handler, "0.0.0.0", port)
+    logging.info(f"WebSocket Server running on ws://0.0.0.0:{port}")
     
     # Try FastF1 first, fallback to simulation
     await fastf1_live_bridge()
