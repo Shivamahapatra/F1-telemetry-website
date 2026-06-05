@@ -16,15 +16,17 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   return (
-    <main className="h-screen w-screen overflow-hidden bg-[#0A0D14] text-white flex">
-      {/* Fixed Left Sidebar - 15% Width */}
-      <div className="w-[15%] min-w-[240px] h-full border-r border-slate-800/50 flex flex-col bg-[#0F131D]">
+    <main className="h-screen w-screen overflow-hidden bg-[#0A0D14] text-white flex flex-col lg:flex-row">
+      {/* Responsive Sidebar - Horizontal on Mobile, Vertical on Desktop */}
+      <div className="w-full lg:w-[15%] lg:min-w-[240px] shrink-0 border-b lg:border-b-0 lg:border-r border-slate-800/50 flex flex-col bg-[#0F131D]">
         <LeftNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
-        <YouTubeHub />
+        <div className="hidden lg:block">
+            <YouTubeHub />
+        </div>
       </div>
 
-      {/* Dynamic Main Content Area - 85% Width */}
-      <div className="flex-1 h-full relative overflow-hidden bg-[#0A0D14]">
+      {/* Dynamic Main Content Area */}
+      <div className="flex-1 relative overflow-y-auto lg:overflow-hidden bg-[#0A0D14]">
         {activeTab === 'dashboard' && <LiveTimingView />}
         {activeTab === 'calendar' && <CalendarView />}
         {activeTab === 'news' && <NewsView />}

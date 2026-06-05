@@ -50,7 +50,7 @@ export default function LiveTimingSidebar() {
       </div>
 
       {/* Column Headers */}
-      <div className="grid grid-cols-[20px_60px_1fr_1fr_1fr_2fr_40px] gap-2 px-4 py-3 border-b border-slate-800 text-[10px] font-bold text-slate-500 tracking-widest uppercase">
+      <div className="grid grid-cols-[20px_60px_1fr_1fr_1fr_2fr_40px] gap-2 px-4 py-3 border-b border-slate-800 text-[10px] font-bold text-slate-500 tracking-widest uppercase min-w-[600px]">
         <div></div>
         <div>DRIVER</div>
         <div className="text-right">BEST</div>
@@ -61,7 +61,7 @@ export default function LiveTimingSidebar() {
       </div>
 
       {/* Driver List */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1 min-w-[600px]">
         {isOffline ? (
             OFFLINE_STANDINGS.map((d) => (
                 <div key={d.driver} className="grid grid-cols-[20px_60px_1fr_1fr_1fr_2fr_40px] items-center gap-2 py-1 px-2 hover:bg-slate-800/50 rounded group">
