@@ -17,9 +17,8 @@ export function useF1Telemetry() {
   const [telemetryState, setTelemetryState] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
-    const ws = new WebSocket('wss://f1-telemetry-website.onrender.com');
-    // Fallback for local testing if needed
-    // const ws = new WebSocket('ws://localhost:8765');
+    // Connect to the local python fastf1 backend
+    const ws = new WebSocket('ws://localhost:8765');
     
     ws.onmessage = (event) => {
       try {
