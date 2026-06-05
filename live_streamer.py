@@ -88,8 +88,23 @@ async def handler(websocket):
     finally:
         connected_clients.remove(websocket)
 
+CAR_TO_DRIVER = {
+    "1": "VER", "11": "PER",
+    "44": "HAM", "63": "RUS",
+    "16": "LEC", "55": "SAI",
+    "4": "NOR", "81": "PIA",
+    "14": "ALO", "18": "STR",
+    "10": "GAS", "31": "OCO",
+    "23": "ALB", "2": "SAR",
+    "22": "TSU", "3": "RIC",
+    "77": "BOT", "24": "ZHO",
+    "20": "MAG", "27": "HUL"
+}
+
 async def tail_file_and_broadcast(filename):
     """Asynchronously tails the file and broadcasts parsed JSON to clients."""
+    driver_state = {}
+    
     with open(filename, 'r') as f:
         # Read from the beginning to catch up, then tail
         while True:
@@ -101,25 +116,74 @@ async def tail_file_and_broadcast(filename):
             try:
                 data = json.loads(line)
                 
-                # Simplified filter for demo (FastF1 saves raw SignalR messages)
                 topic = data.get("M", [{}])[0].get("H")
                 msg = data.get("M", [{}])[0].get("A", [{}])[0]
 
                 if topic == "Streaming" and msg.get("TimingData"):
-                    broadcast_data = {
-                        "topic": "TimingData",
-                        "data": msg["TimingData"]
-                    }
-                    websockets.broadcast(connected_clients, json.dumps(broadcast_data))
+                    timing_data = msg["TimingData"]
+                    lines = timing_data.get("Lines", {})
+                    for car_num, car_data in lines.items():
+                        drv = CAR_TO_DRIVER.get(car_num, f"CAR{car_num}")
+                        if drv not in driver_state:
+                            driver_state[drv] = {
+                                "driver": drv, "position": 99, "lap": 0,
+                                "bestLap": "", "lastLap": "",
+                                "s1": "", "s2": "", "s3": "",
+                                "gapToLeader": "", "interval": "",
+                                "pitStatus": "", "tire": "SOFT"
+                            }
+                            
+                        state = driver_state[drv]
+                        
+                        if "Position" in car_data:
+                            try:
+                                state["position"] = int(car_data["Position"])
+                            except: pass
+                        if "BestLapTime" in car_data and isinstance(car_data["BestLapTime"], dict):
+                            state["bestLap"] = car_data["BestLapTime"].get("Value", state["bestLap"])
+                        if "LastLapTime" in car_data and isinstance(car_data["LastLapTime"], dict):
+                            state["lastLap"] = car_data["LastLapTime"].get("Value", state["lastLap"])
+                        if "GapToLeader" in car_data:
+                            state["gapToLeader"] = car_data["GapToLeader"]
+                        if "IntervalToPositionAhead" in car_data and isinstance(car_data["IntervalToPositionAhead"], dict):
+                            state["interval"] = car_data["IntervalToPositionAhead"].get("Value", state["interval"])
+                        if "InPit" in car_data:
+                            state["pitStatus"] = "IN PIT" if car_data["InPit"] else ""
+                            
+                        if "Sectors" in car_data:
+                            sectors = car_data["Sectors"]
+                            if "0" in sectors and isinstance(sectors["0"], dict): state["s1"] = sectors["0"].get("Value", state["s1"])
+                            if "1" in sectors and isinstance(sectors["1"], dict): state["s2"] = sectors["1"].get("Value", state["s2"])
+                            if "2" in sectors and isinstance(sectors["2"], dict): state["s3"] = sectors["2"].get("Value", state["s3"])
+
+                        broadcast_data = {
+                            "topic": "TimingData",
+                            "data": state
+                        }
+                        websockets.broadcast(connected_clients, json.dumps(broadcast_data))
                 
                 elif topic == "Streaming" and msg.get("Position.z"):
                     positions = msg["Position.z"].get("Position", [])
                     for p in positions:
+                        drv = CAR_TO_DRIVER.get(p.get("Entries", {}).get("0", ""), p.get("driver", "UNK"))
                         broadcast_data = {
                             "topic": "Position",
-                            "data": { "driver": p.get("driver"), "x": p.get("X"), "y": p.get("Y") }
+                            "data": { "driver": drv, "x": p.get("X"), "y": p.get("Y") }
                         }
                         websockets.broadcast(connected_clients, json.dumps(broadcast_data))
+                        
+                elif topic == "Streaming" and msg.get("SessionInfo"):
+                    session = msg["SessionInfo"]
+                    broadcast_data = {
+                        "topic": "SessionInfo",
+                        "data": {
+                            "name": session.get("Path", "Formula 1 Session"),
+                            "status": "Green",
+                            "lap": 0,
+                            "totalLaps": 0
+                        }
+                    }
+                    websockets.broadcast(connected_clients, json.dumps(broadcast_data))
             except json.JSONDecodeError:
                 pass
             except Exception as e:
@@ -151,13 +215,10 @@ async def fastf1_live_bridge():
         t.start()
         
         # Wait a moment for the connection to establish and create the file
-        await asyncio.sleep(5)
+        await asyncio.sleep(3)
         
         if not t.is_alive():
             raise Exception("FastF1 client thread crashed on startup (F1 Live Timing is likely offline).")
-            
-        if os.path.exists(filename) and os.path.getsize(filename) == 0:
-            raise Exception("FastF1 connected but receiving no data (F1 Live Timing is currently between sessions).")
         
         asyncio.create_task(tail_file_and_broadcast(filename))
         
