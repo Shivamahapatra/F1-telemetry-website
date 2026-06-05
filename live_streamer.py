@@ -222,13 +222,13 @@ def _run_fastf1_client_thread(filename):
         logging.error(f"F1 Client thread error: {e}")
 
 async def simulate_live_stream(race_name, track_map_coords):
-    logging.info("Starting historical 2026 replay simulation stream...")
+    logging.info("Starting historical replay simulation stream...")
     
-    # Load Real 2026 Canadian GP Data!
+    # Load 2025 Monaco GP Data for Replay/Map since 2026 Race hasn't happened yet!
     try:
-        logging.info("Fetching real 2026 Canadian GP data for replay...")
-        year = datetime.datetime.utcnow().year
-        session = fastf1.get_session(year, "Canadian Grand Prix", "R")
+        logging.info("Fetching real 2025 Monaco GP data for replay...")
+        year = datetime.datetime.utcnow().year - 1
+        session = fastf1.get_session(year, "Monaco Grand Prix", "R")
         session.load(telemetry=False, weather=False, messages=False)
         results = session.results
         
@@ -258,7 +258,7 @@ async def simulate_live_stream(race_name, track_map_coords):
             session_info = {
                 "topic": "SessionInfo",
                 "data": {
-                    "name": f"{race_name or 'Formula 1'} - Live Replay (2026 Data)",
+                    "name": f"{race_name or 'Monaco Grand Prix'} - Live Replay (2025 Data)",
                     "status": "Green",
                     "lap": sim_state[drivers[0]]["lap_count"] + 1,
                     "totalLaps": 70
@@ -315,9 +315,9 @@ async def fastf1_live_bridge():
     
     if race_name:
         try:
-            logging.info("Loading track map for 2026 Canadian Grand Prix...")
-            year = datetime.datetime.utcnow().year
-            session = fastf1.get_session(year, "Canadian Grand Prix", "R")
+            logging.info("Loading track map for Monaco Grand Prix (using 2025 data)...")
+            year = datetime.datetime.utcnow().year - 1
+            session = fastf1.get_session(year, "Monaco Grand Prix", "R")
             session.load(telemetry=True, weather=False, messages=False)
             lap = session.laps.pick_fastest()
             tel = lap.get_telemetry()
