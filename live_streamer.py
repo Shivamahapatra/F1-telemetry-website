@@ -151,10 +151,13 @@ async def fastf1_live_bridge():
         t.start()
         
         # Wait a moment for the connection to establish and create the file
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
         
         if not t.is_alive():
             raise Exception("FastF1 client thread crashed on startup (F1 Live Timing is likely offline).")
+            
+        if os.path.exists(filename) and os.path.getsize(filename) == 0:
+            raise Exception("FastF1 connected but receiving no data (F1 Live Timing is currently between sessions).")
         
         asyncio.create_task(tail_file_and_broadcast(filename))
         
