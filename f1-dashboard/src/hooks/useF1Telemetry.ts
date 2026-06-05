@@ -6,6 +6,8 @@ export function useF1Telemetry() {
   const [sessionInfo, setSessionInfo] = useState<any>({});
   const [weatherData, setWeatherData] = useState<any>({});
   const [trackCoords, setTrackCoords] = useState<any[]>([]);
+  const [raceControlMsgs, setRaceControlMsgs] = useState<any[]>([]);
+  const [teamRadioMsgs, setTeamRadioMsgs] = useState<any[]>([]);
   
   const [selectedDrivers, setSelectedDrivers] = useState<string[]>(['VER', 'HAM']);
   const selectedDriversRef = useRef<string[]>(['VER', 'HAM']);
@@ -60,6 +62,12 @@ export function useF1Telemetry() {
             telemetryBufferRef.current[driver].shift();
           }
         }
+        else if (message.topic === 'RaceControl') {
+          setRaceControlMsgs(prev => [message.data, ...prev].slice(0, 50));
+        }
+        else if (message.topic === 'TeamRadio') {
+          setTeamRadioMsgs(prev => [message.data, ...prev].slice(0, 50));
+        }
       } catch (err) {
         console.error("WS Parse error", err);
       }
@@ -81,5 +89,5 @@ export function useF1Telemetry() {
     };
   }, []);
 
-  return { timingData, telemetryState, trackPositions, sessionInfo, weatherData, selectedDrivers, setSelectedDrivers, trackCoords };
+  return { timingData, telemetryState, trackPositions, sessionInfo, weatherData, selectedDrivers, setSelectedDrivers, trackCoords, raceControlMsgs, teamRadioMsgs };
 }

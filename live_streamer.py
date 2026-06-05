@@ -241,29 +241,32 @@ async def simulate_live_stream(race_name, track_map_coords):
         logging.info("Fetching real 2025 Monaco GP data for replay...")
         year = datetime.datetime.utcnow().year - 1
         session = fastf1.get_session(year, "Monaco Grand Prix", "R")
-        session.load(telemetry=False, weather=False, messages=False)
+        session.load(telemetry=False, weather=False, messages=True)
         results = session.results
         laps = session.laps
+        messages = session.messages
         
         sim_state = {}
         for count, (idx, row) in enumerate(results.iterrows()):
             drv = row['Abbreviation']
-            best_lap = row.get('BestLapTime', pd.NaT)
             race_time = row.get('Time', pd.NaT)
             
-            # Fetch real S1, S2, S3, and Tire from the fastest lap
+            # Fetch real S1, S2, S3, LapTime, and Tire from the fastest lap
             driver_laps = laps.pick_driver(drv)
-            s1, s2, s3, compound = "", "", "", ""
+            s1, s2, s3, compound, lap_time = "", "", "", "SOFT", "1:15.000"
             if not driver_laps.empty:
                 fastest = driver_laps.pick_fastest()
                 s1 = f"{fastest['Sector1Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector1Time']) else ""
                 s2 = f"{fastest['Sector2Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector2Time']) else ""
                 s3 = f"{fastest['Sector3Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector3Time']) else ""
-                compound = fastest['Compound'] if pd.notnull(fastest['Compound']) else ""
+                compound = str(fastest['Compound']).upper() if pd.notnull(fastest['Compound']) else "SOFT"
+                lt = fastest['LapTime']
+                if pd.notnull(lt):
+                    lap_time = str(lt).split(' ')[-1][:9]
             
             sim_state[drv] = {
                 "position": row['Position'],
-                "lap_time": str(best_lap).split(' ')[-1][:9] if pd.notnull(best_lap) else "1:15.000",
+                "lap_time": lap_time,
                 "s1": s1,
                 "s2": s2,
                 "s3": s3,
@@ -274,10 +277,33 @@ async def simulate_live_stream(race_name, track_map_coords):
                 "lap_count": 0
             }
         drivers = list(sim_state.keys())
+        
+        # Parse Race Control and Team Radio Messages
+        race_control = []
+        team_radio = []
+        if messages is not None and not messages.empty:
+            for _, msg_row in messages.iterrows():
+                time_str = str(msg_row.get("Time", "")).split(" ")[-1][:8]
+                cat = str(msg_row.get("Category", "Flag"))
+                text = str(msg_row.get("Message", ""))
+                if cat == "Flag" and "YELLOW" in text.upper():
+                    race_control.append({"time": time_str, "type": "yellow", "text": text})
+                elif cat == "Flag" and "GREEN" in text.upper():
+                    race_control.append({"time": time_str, "type": "green", "text": text})
+                elif cat == "Drs":
+                    race_control.append({"time": time_str, "type": "info", "text": text})
+                elif "INVESTIGAT" in text.upper() or "PENALTY" in text.upper():
+                    race_control.append({"time": time_str, "type": "incident", "text": text})
+                elif cat == "Track" or cat == "SafetyCar":
+                    race_control.append({"time": time_str, "type": "incident", "text": text})
+                else:
+                    team_radio.append({"time": time_str, "driver": "RACE CONTROL", "text": text, "color": "#0090FF"})
     except Exception as e:
         logging.error(f"Error loading real 2025 data: {e}")
         drivers = ["VER", "PER", "HAM", "RUS", "LEC", "SAI", "NOR", "PIA", "ALO", "STR", "GAS", "OCO", "ALB", "SAR", "BOT", "ZHO", "MAG", "HUL", "TSU", "RIC"]
         sim_state = {drv: {"position": i+1, "lap_time": "1:15.000", "gap": "+0.000", "interval": "+0.000", "tire": "Soft", "pos_index": i*5, "lap_count": 0} for i, drv in enumerate(drivers)}
+        race_control = []
+        team_radio = []
 
     while True:
         if connected_clients:
@@ -309,6 +335,18 @@ async def simulate_live_stream(race_name, track_map_coords):
                 
                 if state["pos_index"] == 0 or not track_map_coords:
                     state["lap_count"] += 1
+                    
+                    # Randomly broadcast one race control and one team radio message occasionally
+                    if race_control and state["lap_count"] % 5 == 0:
+                        rc_msg = race_control[(state["lap_count"] // 5) % len(race_control)]
+                        websockets.broadcast(connected_clients, json.dumps({
+                            "topic": "RaceControl", "data": rc_msg
+                        }))
+                    if team_radio and state["lap_count"] % 3 == 0:
+                        tr_msg = team_radio[(state["lap_count"] // 3) % len(team_radio)]
+                        websockets.broadcast(connected_clients, json.dumps({
+                            "topic": "TeamRadio", "data": tr_msg
+                        }))
                     
                 timing_data = {
                     "topic": "TimingData",
