@@ -79,19 +79,65 @@ export default function DynamicMapPlot() {
     dragmode: 'pan',
   };
 
+  const [countdown, setCountdown] = React.useState('');
+  
+  React.useEffect(() => {
+    // Countdown to an approximate FP1 time (for demo purposes)
+    const targetDate = new Date('2026-06-05T17:30:00Z').getTime();
+    
+    const interval = setInterval(() => {
+      const now = new Date().getTime();
+      const distance = targetDate - now;
+      
+      if (distance < 0) {
+        setCountdown('SESSION IMMINENT');
+        return;
+      }
+      
+      const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+      
+      setCountdown(`${days}D ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="w-full h-full relative">
-      <Plot
-        data={plotData as any}
-        layout={layout as any}
-        config={{ responsive: true, displayModeBar: false }}
-        style={{ width: '100%', height: '100%' }}
-        useResizeHandler={true}
-      />
-      {/* Optional: Add a subtle logo or watermark in the background of the map */}
-      <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-5">
-        <h1 className="text-[150px] font-black italic">F1</h1>
-      </div>
+      {timingData.length > 0 ? (
+        <Plot
+          data={plotData as any}
+          layout={layout as any}
+          config={{ responsive: true, displayModeBar: false }}
+          style={{ width: '100%', height: '100%' }}
+          useResizeHandler={true}
+        />
+      ) : (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0A0D14] z-10 p-8 rounded-2xl border border-slate-800/50 m-4">
+            <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-6 border-4 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+               <span className="text-4xl">🚦</span>
+            </div>
+            
+            <h2 className="text-4xl font-black text-white tracking-widest uppercase mb-2">Track is Empty</h2>
+            <p className="text-slate-400 text-lg mb-10 max-w-md text-center">F1 telemetry servers are online, but there are no cars on the circuit. Waiting for the next official session to begin.</p>
+            
+            <div className="bg-[#0F131D] border border-slate-700/50 px-12 py-6 rounded-xl flex flex-col items-center shadow-2xl relative overflow-hidden group">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+                <span className="text-xs font-bold tracking-[0.3em] text-[var(--color-neon-red)] uppercase mb-3">Next Event Starts In</span>
+                <span className="text-5xl font-black tracking-tight text-white font-mono drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]">
+                    {countdown}
+                </span>
+            </div>
+            
+            {/* Background Logo */}
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-[0.02]">
+               <h1 className="text-[300px] font-black italic">F1</h1>
+            </div>
+        </div>
+      )}
     </div>
   );
 }
