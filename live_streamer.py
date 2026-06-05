@@ -168,9 +168,79 @@ async def fastf1_live_bridge():
         logging.warning(f"FastF1 connection failed/skipped: {e}. Falling back to simulation loop.")
         await simulate_live_stream()
 
+upcoming_race = None
+track_layout = []
+
+def fetch_upcoming_race():
+    global upcoming_race, track_layout
+    try:
+        import urllib.request
+        from datetime import datetime
+        res = urllib.request.urlopen('https://api.jolpi.ca/ergast/f1/current.json')
+        data = json.loads(res.read())
+        races = data['MRData']['RaceTable']['Races']
+        now_str = datetime.utcnow().isoformat() + "Z"
+        
+        for race in races:
+            race_time_str = race['date'] + "T" + race.get('time', '00:00:00Z')
+            if race_time_str > now_str:
+                upcoming_race = race
+                break
+        if not upcoming_race:
+            upcoming_race = races[-1]
+            
+        logging.info(f"Upcoming race found: {upcoming_race['raceName']}")
+        
+        # Load track layout using fastf1 (use 2023 for reliable offline cache)
+        gp = upcoming_race['Circuit']['circuitName']
+        if 'Albert Park' in gp: gp = 'Australia' # FastF1 name mapping
+        elif 'Miami' in gp: gp = 'Miami'
+        elif 'Circuit de Monaco' in gp: gp = 'Monaco'
+        elif 'Circuit Gilles-Villeneuve' in gp: gp = 'Canada'
+        elif 'Red Bull Ring' in gp: gp = 'Austria'
+        elif 'Silverstone' in gp: gp = 'Great Britain'
+        elif 'Hungaroring' in gp: gp = 'Hungary'
+        elif 'Spa' in gp: gp = 'Belgium'
+        elif 'Zandvoort' in gp: gp = 'Netherlands'
+        elif 'Monza' in gp: gp = 'Italy'
+        elif 'Baku' in gp: gp = 'Azerbaijan'
+        elif 'Marina Bay' in gp: gp = 'Singapore'
+        elif 'Suzuka' in gp: gp = 'Japan'
+        elif 'Lusail' in gp: gp = 'Qatar'
+        elif 'Austin' in gp: gp = 'United States'
+        elif 'Hermanos Rodriguez' in gp: gp = 'Mexico'
+        elif 'Interlagos' in gp: gp = 'Brazil'
+        elif 'Las Vegas' in gp: gp = 'Las Vegas'
+        elif 'Yas Marina' in gp: gp = 'Abu Dhabi'
+        elif 'Jeddah' in gp: gp = 'Saudi Arabia'
+        elif 'Bahrain' in gp: gp = 'Bahrain'
+        
+        try:
+            logging.info(f"Loading track map for {gp}...")
+            session = fastf1.get_session(2023, gp, 'Q')
+            session.load(telemetry=True, weather=False, messages=False)
+            lap = session.laps.pick_fastest()
+            tel = lap.get_telemetry()
+            # Downsample
+            tel = tel.iloc[::max(1, len(tel)//150)]
+            for index, row in tel.iterrows():
+                track_layout.append({"x": float(row['X']), "y": float(row['Y'])})
+            logging.info(f"Loaded {len(track_layout)} track coordinates.")
+        except Exception as e:
+            logging.error(f"Failed to load track map: {e}")
+            track_layout = []
+            
+    except Exception as e:
+        logging.error(f"Failed to fetch upcoming race: {e}")
+        upcoming_race = {"season": "2026", "raceName": "Simulated Grand Prix", "date": "2026-12-31"}
+
 async def simulate_live_stream():
     """Simulates the incoming WebSocket data structure and broadcasts it."""
     logging.info("Starting simulated local WebSocket stream...")
+    
+    if not upcoming_race:
+        # Run synchronous fetch in a thread so it doesn't block startup
+        await asyncio.to_thread(fetch_upcoming_race)
     
     # 20 drivers to test the dynamic leaderboard mapping
     drivers = [
@@ -190,10 +260,10 @@ async def simulate_live_stream():
             session_data = {
                 "topic": "SessionInfo",
                 "data": {
-                    "name": "FORMULA 1 LENOVO GRAND PRIX DU CANADA 2026",
+                    "name": upcoming_race['raceName'].upper() if upcoming_race else "FORMULA 1 GRAND PRIX",
                     "status": "Green",
                     "lap": int(current_time / 60) + 1,
-                    "totalLaps": 68
+                    "totalLaps": int(upcoming_race.get('Circuit', {}).get('totalLaps', 68)) if upcoming_race else 68
                 }
             }
             websockets.broadcast(connected_clients, json.dumps(session_data))
@@ -212,30 +282,35 @@ async def simulate_live_stream():
             
             # Timing Data
             for i, drv in enumerate(drivers):
+                is_pit = (i % 5 == 0 and int(current_time) % 120 < 15)
+                tire_compound = "SOFT" if i % 3 == 0 else "MEDIUM" if i % 2 == 0 else "HARD"
+                
                 simulated_timing = {
                     "topic": "TimingData",
                     "data": {
                         "driver": drv,
                         "position": i + 1,
                         "lap": int(current_time / 60) + 1,
-                        "s1": f"28.{532 + i*10:03d}",
-                        "s2": f"30.{111 + i*5:03d}",
-                        "s3": f"24.{992 + i*2:03d}",
-                        "gapToLeader": f"+{i * 0.3:.3f}",
-                        "interval": f"+0.300"
+                        "s1": f"28.{532 + i*10 + int(math.sin(current_time)*10):03d}" if not is_pit else "",
+                        "s2": f"30.{111 + i*5 + int(math.cos(current_time)*5):03d}" if not is_pit else "",
+                        "s3": f"24.{992 + i*2 + int(math.sin(current_time*2)*2):03d}" if not is_pit else "",
+                        "gapToLeader": f"+{i * 0.8 + (math.sin(current_time*0.1)*i*0.1):.3f}" if i > 0 else "",
+                        "interval": f"+{0.8 + (math.sin(current_time*0.1)*0.1):.3f}" if i > 0 else "",
+                        "pitStatus": "IN PIT" if is_pit else "",
+                        "tire": tire_compound
                     }
                 }
                 websockets.broadcast(connected_clients, json.dumps(simulated_timing))
             
             # Telemetry Data
             for _ in range(2): 
-                for drv in drivers:
+                for i, drv in enumerate(drivers):
                     simulated_telemetry = {
                         "topic": "Telemetry",
                         "data": {
                             "driver": drv,
                             "time": current_time,
-                            "speed": 300 - (drivers.index(drv) * 2) + (math.sin(current_time) * 10),
+                            "speed": 300 - (i * 2) + (math.sin(current_time) * 10),
                             "rpm": 11000 + (math.sin(current_time) * 500),
                             "gear": 8
                         }
@@ -244,13 +319,18 @@ async def simulate_live_stream():
                 await asyncio.sleep(0.5)
 
             # Track Position (Plotly X/Y)
-            for drv in drivers:
-                idx = drivers.index(drv)
-                track_progress = (current_time * 0.5) - (idx * 0.2)
-                
-                # Figure 8 track shape
-                x = 500 * math.sin(track_progress)
-                y = 200 * math.sin(track_progress * 2)
+            for i, drv in enumerate(drivers):
+                if track_layout:
+                    # Move around the actual track coords
+                    speed = 2.0  # indices per second
+                    track_idx = int((current_time * speed) - (i * 5)) % len(track_layout)
+                    x = track_layout[track_idx]['x']
+                    y = track_layout[track_idx]['y']
+                else:
+                    # Fallback Figure 8 track shape
+                    track_progress = (current_time * 0.5) - (i * 0.2)
+                    x = 500 * math.sin(track_progress)
+                    y = 200 * math.sin(track_progress * 2)
                 
                 simulated_position = {
                     "topic": "Position",

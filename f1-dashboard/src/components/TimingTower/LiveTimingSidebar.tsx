@@ -103,17 +103,50 @@ export default function LiveTimingSidebar() {
               ))
         ) : (
             timingData.map((d, i) => (
-              <div key={d.driver} className="grid grid-cols-[20px_60px_1fr_1fr_1fr_2fr_40px] items-center gap-2 py-2 px-2 hover:bg-slate-800/50 rounded group">
+              <div key={d.driver} className="grid grid-cols-[20px_60px_1fr_1fr_1fr_2fr_40px] items-center gap-2 py-1 px-2 hover:bg-slate-800/50 rounded group">
                 <span className="text-slate-500 font-bold text-xs">{i + 1}</span>
                 <div className="flex items-center gap-2">
                   <div className="w-[3px] h-4 rounded" style={{ backgroundColor: TEAM_COLORS[d.driver] || '#fff' }}></div>
                   <span className="text-slate-300 font-bold tracking-wider">{d.driver}</span>
                 </div>
-                <span className="text-[var(--color-neon-green)] font-mono text-xs text-right font-bold">{d.bestLap || '-'}</span>
-                <span className="text-white font-mono text-xs text-right font-bold">{d.gapToLeader || '-'}</span>
-                <span className="text-slate-300 font-mono text-xs text-center font-bold">{d.lastLap || '-'}</span>
-                <div className="text-center text-slate-600 text-xs">-</div>
-                <div className="text-center text-slate-600 text-xs">-</div>
+                <span className="text-[var(--color-neon-green)] font-mono text-xs text-right font-bold">{d.s1 ? d.s1 : '-'}</span>
+                
+                <div className="flex flex-col items-end leading-tight">
+                    <span className="text-white font-mono text-xs font-bold">{d.gapToLeader || '-'}</span>
+                    {i > 0 && d.interval && <span className="text-[10px] text-blue-400 font-mono">{d.interval}</span>}
+                </div>
+
+                <div className="text-center">
+                    {d.pitStatus ? (
+                        <span className="bg-red-900/50 text-red-500 border border-red-800/50 px-2 py-0.5 rounded text-[10px] font-bold tracking-widest">{d.pitStatus}</span>
+                    ) : (
+                        <span className="text-slate-300 font-mono text-xs text-center font-bold">{d.s3 || '-'}</span>
+                    )}
+                </div>
+
+                <div className="flex flex-col items-center justify-center gap-1">
+                    {!d.pitStatus && d.s1 && d.s2 && d.s3 ? (
+                      <div className="flex justify-between w-full px-2 text-[9px] font-mono font-bold">
+                          <span className="text-yellow-500">{d.s1}</span>
+                          <span className="text-green-500">{d.s2}</span>
+                          <span className="text-purple-500">{d.s3}</span>
+                      </div>
+                    ) : (
+                      <div className="text-[9px] text-slate-600 font-bold">-</div>
+                    )}
+                </div>
+
+                <div className="flex flex-col items-center justify-center gap-0.5">
+                    {d.tire ? (
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold border-2
+                          ${d.tire === 'SOFT' ? 'border-red-500 text-red-500' : d.tire === 'MEDIUM' ? 'border-yellow-500 text-yellow-500' : 'border-white text-white'}`}>
+                          {d.tire[0]}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-600 font-bold">-</div>
+                    )}
+                    <span className="text-[9px] text-slate-500 font-mono">{(i%3)+2}L</span>
+                </div>
               </div>
             ))
         )}
