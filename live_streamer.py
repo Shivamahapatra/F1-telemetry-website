@@ -243,6 +243,7 @@ async def simulate_live_stream(race_name, track_map_coords):
         session = fastf1.get_session(year, "Monaco Grand Prix", "R")
         session.load(telemetry=False, weather=False, messages=False)
         results = session.results
+        laps = session.laps
         
         sim_state = {}
         for count, (idx, row) in enumerate(results.iterrows()):
@@ -250,12 +251,25 @@ async def simulate_live_stream(race_name, track_map_coords):
             best_lap = row.get('BestLapTime', pd.NaT)
             race_time = row.get('Time', pd.NaT)
             
+            # Fetch real S1, S2, S3, and Tire from the fastest lap
+            driver_laps = laps.pick_driver(drv)
+            s1, s2, s3, compound = "", "", "", ""
+            if not driver_laps.empty:
+                fastest = driver_laps.pick_fastest()
+                s1 = f"{fastest['Sector1Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector1Time']) else ""
+                s2 = f"{fastest['Sector2Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector2Time']) else ""
+                s3 = f"{fastest['Sector3Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector3Time']) else ""
+                compound = fastest['Compound'] if pd.notnull(fastest['Compound']) else ""
+            
             sim_state[drv] = {
                 "position": row['Position'],
                 "lap_time": str(best_lap).split(' ')[-1][:9] if pd.notnull(best_lap) else "1:15.000",
+                "s1": s1,
+                "s2": s2,
+                "s3": s3,
                 "gap": f"+{race_time.total_seconds():.3f}" if pd.notnull(race_time) and count > 0 else ("" if count == 0 else "+1L"),
                 "interval": "0.000",
-                "tire": "Medium",
+                "tire": compound,
                 "pos_index": (count * 5) % len(track_map_coords) if track_map_coords else 0,
                 "lap_count": 0
             }
@@ -303,9 +317,9 @@ async def simulate_live_stream(race_name, track_map_coords):
                         "position": state["position"],
                         "bestLap": state["lap_time"],
                         "lastLap": state["lap_time"],
-                        "s1": "20.100",
-                        "s2": "23.400",
-                        "s3": "31.500",
+                        "s1": state["s1"],
+                        "s2": state["s2"],
+                        "s3": state["s3"],
                         "gapToLeader": state["gap"],
                         "interval": state["interval"],
                         "pitStatus": "",
