@@ -125,6 +125,17 @@ async def tail_file_and_broadcast(filename):
             except Exception as e:
                 logging.error(f"Error parsing line: {e}")
 
+import threading
+
+def _run_fastf1_client_thread(filename):
+    try:
+        # FastF1 client internally uses asyncio.run, which conflicts with our main loop
+        # Running it in a separate thread fixes the "asyncio.run() cannot be called from a running event loop" error
+        client = SignalRClient(filename, timeout=60)
+        client.start()
+    except Exception as e:
+        logging.error(f"F1 Client thread error: {e}")
+
 async def fastf1_live_bridge():
     """
     Connects to the real FastF1 SignalR client and tails the output file.
@@ -135,9 +146,13 @@ async def fastf1_live_bridge():
 
     logging.info("Attempting to connect to real FastF1 SignalR Live Timing...")
     try:
-        client = SignalRClient(filename)
-        # Start the real connection to F1 servers
-        await client.start()
+        # Start the real connection to F1 servers in a background thread
+        t = threading.Thread(target=_run_fastf1_client_thread, args=(filename,), daemon=True)
+        t.start()
+        
+        # Wait a moment for the connection to establish and create the file
+        await asyncio.sleep(2)
+        
         asyncio.create_task(tail_file_and_broadcast(filename))
         
         # Keep the connection alive
