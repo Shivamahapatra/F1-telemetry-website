@@ -73,7 +73,7 @@ export default function LiveTimingSidebar() {
               <div key={d.driver} className="grid grid-cols-[20px_60px_1fr_1fr_1fr_2fr_40px] items-center gap-2 py-1 px-2 hover:bg-slate-800/50 rounded group">
                 <span className="text-slate-500 font-bold text-xs">{i + 1}</span>
                 <div className="flex items-center gap-2">
-                  <div className="w-[3px] h-4 rounded" style={{ backgroundColor: TEAM_COLORS[d.driver] || '#fff' }}></div>
+                  <div className="w-[3px] h-4 rounded" style={{ backgroundColor: d.teamColor || TEAM_COLORS[d.driver] || '#fff' }}></div>
                   <span className="text-slate-300 font-bold tracking-wider">{d.driver}</span>
                 </div>
                 <span className="text-[var(--color-neon-green)] font-mono text-xs text-right font-bold">{d.bestLap ? d.bestLap : '-'}</span>

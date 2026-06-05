@@ -285,14 +285,21 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
         messages = session.race_control_messages
         
         sim_state = {}
+        driver_colors = {}
         
-        # Determine driver positions
+        # Determine driver positions and colors
         driver_positions = {}
         for count, (idx, row) in enumerate(results.iterrows()):
             drv = row['Abbreviation']
             pos = row.get('Position')
             if pd.notnull(pos):
                 driver_positions[drv] = int(pos)
+                
+            color = row.get('TeamColor')
+            if color and pd.notnull(color) and isinstance(color, str):
+                if not color.startswith('#'):
+                    color = f"#{color}"
+                driver_colors[drv] = color
 
         # If positions are not available (like in practice sessions), rank by fastest lap
         if not driver_positions or any(pd.isnull(results['Position'])):
@@ -382,6 +389,7 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
         logging.error(f"Error loading real session data: {e}")
         drivers = ["VER", "PER", "HAM", "RUS", "LEC", "SAI", "NOR", "PIA", "ALO", "STR", "GAS", "OCO", "ALB", "SAR", "BOT", "ZHO", "MAG", "HUL", "TSU", "RIC"]
         sim_state = {drv: {"position": i+1, "lap_time": "1:15.000", "gap": "+0.000", "interval": "+0.000", "tire": "SOFT", "pos_index": i*5, "lap_count": 0, "s1": "25.100", "s2": "30.200", "s3": "20.100"} for i, drv in enumerate(drivers)}
+        driver_colors = {}
         race_control = []
         team_radio = []
         total_laps = 70
@@ -443,7 +451,8 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
                         "gapToLeader": state["gap"],
                         "interval": state["interval"],
                         "pitStatus": "",
-                        "tire": state["tire"]
+                        "tire": state["tire"],
+                        "teamColor": driver_colors.get(drv, "#FFFFFF")
                     }
                 }
                 websockets.broadcast(connected_clients, json.dumps(timing_data))
