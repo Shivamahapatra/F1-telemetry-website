@@ -233,26 +233,92 @@ def _run_fastf1_client_thread(filename):
     except Exception as e:
         logging.error(f"F1 Client thread error: {e}")
 
-async def simulate_live_stream(race_name, track_map_coords):
-    logging.info("Starting historical replay simulation stream...")
+def get_latest_session_details():
+    """Finds and returns the latest session that has data."""
+    year = datetime.datetime.utcnow().year
+    race_name = get_upcoming_race()
     
-    # Load 2025 Monaco GP Data for Replay/Map since 2026 Race hasn't happened yet!
+    # Try current year sessions first
     try:
-        logging.info("Fetching real 2025 Monaco GP data for replay...")
-        year = datetime.datetime.utcnow().year - 1
-        session = fastf1.get_session(year, "Monaco Grand Prix", "R")
-        session.load(telemetry=False, weather=False, messages=True)
+        event = fastf1.get_event(year, race_name)
+    except Exception as e:
+        logging.error(f"Error getting event: {e}")
+        # Fallback to Monaco
+        race_name = "Monaco Grand Prix"
+        event = fastf1.get_event(year, race_name)
+        
+    country = event.get('Country', 'Monaco')
+    now = datetime.datetime.now(datetime.timezone.utc)
+    
+    for i in range(5, 0, -1):
+        sess_name = event.get(f"Session{i}")
+        sess_date = event.get(f"Session{i}DateUtc")
+        if sess_name and pd.notnull(sess_date):
+            sess_date_utc = pd.Timestamp(sess_date).tz_localize(None).tz_localize(datetime.timezone.utc)
+            if now >= sess_date_utc:
+                try:
+                    session = fastf1.get_session(year, race_name, sess_name)
+                    session.load(telemetry=False, weather=False, messages=False)
+                    if session.laps is not None and len(session.laps) > 0:
+                        logging.info(f"Selected latest session: {year} {race_name} - {sess_name}")
+                        return session, year, race_name, sess_name, country
+                except Exception as e:
+                    logging.warning(f"Could not load {sess_name}: {e}")
+                    
+    # Fallback to previous year's Race
+    fallback_year = year - 1
+    logging.info(f"No completed sessions found for {year} {race_name}. Falling back to {fallback_year} Monaco Grand Prix Race.")
+    try:
+        session = fastf1.get_session(fallback_year, "Monaco Grand Prix", "R")
+        session.load(telemetry=False, weather=False, messages=False)
+        return session, fallback_year, "Monaco Grand Prix", "Race", "Monaco"
+    except Exception as e:
+        logging.error(f"Failed to load fallback 2025 Monaco session: {e}")
+        return None, fallback_year, "Monaco Grand Prix", "Race", "Monaco"
+
+async def simulate_live_stream(session, year, gp, sess_name, country, track_map_coords):
+    logging.info(f"Starting historical replay simulation stream for {year} {gp} - {sess_name}...")
+    
+    try:
         results = session.results
         laps = session.laps
         messages = session.race_control_messages
         
         sim_state = {}
+        
+        # Determine driver positions
+        driver_positions = {}
         for count, (idx, row) in enumerate(results.iterrows()):
             drv = row['Abbreviation']
-            race_time = row.get('Time', pd.NaT)
-            
+            pos = row.get('Position')
+            if pd.notnull(pos):
+                driver_positions[drv] = int(pos)
+
+        # If positions are not available (like in practice sessions), rank by fastest lap
+        if not driver_positions or any(pd.isnull(results['Position'])):
+            driver_fastest = []
+            for drv in session.drivers:
+                drv_laps = laps.pick_drivers(drv)
+                abbr = session.get_driver(drv)['Abbreviation']
+                if not drv_laps.empty:
+                    fastest = drv_laps.pick_fastest()
+                    lt = fastest['LapTime']
+                    driver_fastest.append({
+                        'Driver': abbr,
+                        'LapTime': lt if pd.notnull(lt) else pd.NaT
+                    })
+                else:
+                    driver_fastest.append({
+                        'Driver': abbr,
+                        'LapTime': pd.NaT
+                    })
+            driver_fastest.sort(key=lambda x: x['LapTime'] if pd.notnull(x['LapTime']) else pd.Timedelta(days=99))
+            for pos_idx, item in enumerate(driver_fastest):
+                driver_positions[item['Driver']] = pos_idx + 1
+
+        for count, drv in enumerate(driver_positions.keys()):
             # Fetch real S1, S2, S3, LapTime, and Tire from the fastest lap
-            driver_laps = laps.pick_driver(drv)
+            driver_laps = laps.pick_drivers(drv)
             s1, s2, s3, compound, lap_time = "", "", "", "SOFT", "1:15.000"
             if not driver_laps.empty:
                 fastest = driver_laps.pick_fastest()
@@ -264,18 +330,29 @@ async def simulate_live_stream(race_name, track_map_coords):
                 if pd.notnull(lt):
                     lap_time = str(lt).split(' ')[-1][:9]
             
+            if "PRACTICE" in sess_name.upper():
+                gap = ""
+            else:
+                row = results[results['Abbreviation'] == drv]
+                if not row.empty:
+                    race_time = row.iloc[0].get('Time', pd.NaT)
+                    gap = f"+{race_time.total_seconds():.3f}" if pd.notnull(race_time) and driver_positions[drv] > 1 else ("" if driver_positions[drv] == 1 else "+1L")
+                else:
+                    gap = ""
+
             sim_state[drv] = {
-                "position": row['Position'],
+                "position": driver_positions[drv],
                 "lap_time": lap_time,
                 "s1": s1,
                 "s2": s2,
                 "s3": s3,
-                "gap": f"+{race_time.total_seconds():.3f}" if pd.notnull(race_time) and count > 0 else ("" if count == 0 else "+1L"),
+                "gap": gap,
                 "interval": "0.000",
                 "tire": compound,
                 "pos_index": (count * 5) % len(track_map_coords) if track_map_coords else 0,
                 "lap_count": 0
             }
+            
         drivers = list(sim_state.keys())
         
         # Parse Race Control and Team Radio Messages
@@ -298,22 +375,27 @@ async def simulate_live_stream(race_name, track_map_coords):
                     race_control.append({"time": time_str, "type": "incident", "text": text})
                 else:
                     team_radio.append({"time": time_str, "driver": "RACE CONTROL", "text": text, "color": "#0090FF"})
+                    
+        total_laps = session.total_laps if session.total_laps else 30
+        
     except Exception as e:
-        logging.error(f"Error loading real 2025 data: {e}")
+        logging.error(f"Error loading real session data: {e}")
         drivers = ["VER", "PER", "HAM", "RUS", "LEC", "SAI", "NOR", "PIA", "ALO", "STR", "GAS", "OCO", "ALB", "SAR", "BOT", "ZHO", "MAG", "HUL", "TSU", "RIC"]
         sim_state = {drv: {"position": i+1, "lap_time": "1:15.000", "gap": "+0.000", "interval": "+0.000", "tire": "SOFT", "pos_index": i*5, "lap_count": 0, "s1": "25.100", "s2": "30.200", "s3": "20.100"} for i, drv in enumerate(drivers)}
         race_control = []
         team_radio = []
+        total_laps = 70
 
     while True:
         if connected_clients:
             session_info = {
                 "topic": "SessionInfo",
                 "data": {
-                    "name": f"{race_name or 'Monaco Grand Prix'} - Live Replay (2025 Data)",
+                    "name": f"{gp} - Live Replay ({year} {sess_name})",
                     "status": "Green",
                     "lap": sim_state[drivers[0]]["lap_count"] + 1,
-                    "totalLaps": 70
+                    "totalLaps": total_laps,
+                    "country": country
                 }
             }
             websockets.broadcast(connected_clients, json.dumps(session_info))
@@ -371,21 +453,19 @@ async def simulate_live_stream(race_name, track_map_coords):
 async def fastf1_live_bridge():
     global global_track_map
     filename = 'live_timing_data.txt'
-    # DO NOT remove filename! We want to keep it to replay if we go offline.
-    # if os.path.exists(filename):
-    #     os.remove(filename)
 
     logging.info("Attempting to connect to real FastF1 SignalR Live Timing...")
-    race_name = get_upcoming_race()
     
-    if race_name:
+    session, year, gp, sess_name, country = await asyncio.to_thread(get_latest_session_details)
+    
+    if session:
         try:
-            logging.info("Loading track map for Monaco Grand Prix (using 2025 data)...")
-            year = datetime.datetime.utcnow().year - 1
-            session = fastf1.get_session(year, "Monaco Grand Prix", "R")
-            session.load(telemetry=True, weather=False, messages=False)
+            logging.info(f"Loading track map for {gp} {year} {sess_name}...")
+            await asyncio.to_thread(session.load, telemetry=True, weather=False, messages=True)
+            
             lap = session.laps.pick_fastest()
             tel = lap.get_telemetry()
+            global_track_map.clear()
             for index, row in tel.iterrows():
                 if index % 5 == 0:
                     global_track_map.append({"x": row['X'], "y": row['Y']})
@@ -394,6 +474,8 @@ async def fastf1_live_bridge():
             logging.error(f"Error loading track map: {e}")
             global_track_map = generate_fallback_circle()
             logging.info("Using fallback circle map.")
+    else:
+        global_track_map = generate_fallback_circle()
 
     try:
         t = threading.Thread(target=_run_fastf1_client_thread, args=(filename,))
@@ -414,11 +496,11 @@ async def fastf1_live_bridge():
             logging.info("Replaying the live timing data recorded before going offline...")
             asyncio.create_task(tail_file_and_broadcast(filename, replay_mode=True))
         else:
-            logging.warning("FastF1 connected but receiving 0 bytes. Falling back to 2025 replay.")
-            asyncio.create_task(simulate_live_stream(race_name, global_track_map))
+            logging.warning("FastF1 connected but receiving 0 bytes. Falling back to replay.")
+            asyncio.create_task(simulate_live_stream(session, year, gp, sess_name, country, global_track_map))
     except Exception as e:
         logging.error(f"Failed to start live stream bridge: {e}")
-        asyncio.create_task(simulate_live_stream(race_name, global_track_map))
+        asyncio.create_task(simulate_live_stream(session, year, gp, sess_name, country, global_track_map))
 
 async def main():
     asyncio.create_task(fastf1_live_bridge())

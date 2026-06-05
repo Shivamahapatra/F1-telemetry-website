@@ -2,6 +2,34 @@
 import React from 'react';
 import { useF1Telemetry } from "@/hooks/useF1Telemetry";
 
+const FLAG_MAP: Record<string, string> = {
+  "Monaco": "🇲🇨",
+  "Canada": "🇨🇦",
+  "Bahrain": "🇧🇭",
+  "Saudi Arabia": "🇸🇦",
+  "Australia": "🇦🇺",
+  "Japan": "🇯🇵",
+  "China": "🇨🇳",
+  "Miami": "🇺🇸",
+  "USA": "🇺🇸",
+  "United States": "🇺🇸",
+  "Italy": "🇮🇹",
+  "Spain": "🇪🇸",
+  "Austria": "🇦🇹",
+  "Great Britain": "🇬🇧",
+  "United Kingdom": "🇬🇧",
+  "Hungary": "🇭🇺",
+  "Belgium": "🇧🇪",
+  "Netherlands": "🇳🇱",
+  "Azerbaijan": "🇦🇿",
+  "Singapore": "🇸🇬",
+  "Mexico": "🇲🇽",
+  "Brazil": "🇧🇷",
+  "Las Vegas": "🇺🇸",
+  "Qatar": "🇶🇦",
+  "Abu Dhabi": "🇦🇪"
+};
+
 export default function TopWeatherBar() {
   const { sessionInfo, weatherData } = useF1Telemetry();
 
@@ -18,7 +46,7 @@ export default function TopWeatherBar() {
       {/* Top Row: Title & Status */}
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-4">
-          <span className="text-3xl">🇨🇦</span>
+          <span className="text-3xl">{FLAG_MAP[sessionInfo?.country] || "🏁"}</span>
           <h2 className="text-xl md:text-2xl font-bold uppercase tracking-widest text-slate-200">
             {sessionName}
           </h2>
