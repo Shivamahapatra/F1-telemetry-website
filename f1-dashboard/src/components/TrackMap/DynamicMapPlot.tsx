@@ -73,19 +73,35 @@ export default function DynamicMapPlot() {
       zeroline: false, 
       showticklabels: false,
       scaleanchor: 'x', 
-      scaleratio: 1,
       range: [-300, 300]
     },
     dragmode: 'pan',
   };
 
-  const [countdown, setCountdown] = React.useState('');
+  const [countdown, setCountdown] = React.useState('LOADING...');
   
   React.useEffect(() => {
-    // Countdown to an approximate FP1 time (for demo purposes)
-    const targetDate = new Date('2026-06-05T17:30:00Z').getTime();
+    let targetDate = 0;
+    
+    // Fetch real schedule from Ergast API
+    fetch('https://api.jolpi.ca/ergast/f1/current/next.json')
+      .then(res => res.json())
+      .then(data => {
+         try {
+            const race = data.MRData.RaceTable.Races[0];
+            // Get First Practice time if it exists, otherwise Race time
+            const dateStr = race.FirstPractice ? race.FirstPractice.date : race.date;
+            const timeStr = race.FirstPractice ? race.FirstPractice.time : race.time;
+            targetDate = new Date(`${dateStr}T${timeStr}`).getTime();
+         } catch(e) {
+            console.error("Failed to parse next race", e);
+         }
+      })
+      .catch(e => console.error(e));
     
     const interval = setInterval(() => {
+      if (!targetDate) return;
+      
       const now = new Date().getTime();
       const distance = targetDate - now;
       
@@ -106,7 +122,7 @@ export default function DynamicMapPlot() {
   }, []);
 
   return (
-    <div className="w-full h-full relative">
+    <div className="w-full h-full relative flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2">
       {timingData.length > 0 ? (
         <Plot
           data={plotData as any}
@@ -116,27 +132,65 @@ export default function DynamicMapPlot() {
           useResizeHandler={true}
         />
       ) : (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0A0D14] z-10 p-8 rounded-2xl border border-slate-800/50 m-4">
-            <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-6 border-4 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
-               <span className="text-4xl">🚦</span>
+        <>
+            {/* Session Info Card */}
+            <div className="bg-[#0F131D] border border-green-900/50 rounded-lg p-4 flex flex-col relative overflow-hidden">
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500"></div>
+                <div className="flex items-center gap-2 mb-2">
+                    <span className="w-4 h-4 rounded-full border border-green-500 flex items-center justify-center">
+                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    </span>
+                    <span className="text-[10px] text-green-500 font-bold tracking-widest uppercase">Track Clear</span>
+                </div>
+                <h2 className="text-xl font-bold text-white mb-4">Canadian Grand Prix : Practice 1</h2>
+                <div className="flex gap-4 items-center">
+                    <div className="bg-slate-800/50 border border-slate-700 px-3 py-1 rounded text-xs text-slate-300 flex items-center gap-2">
+                        <span className="text-[10px]">...</span> Session Ends
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 px-3 py-1 rounded text-xs text-slate-300 font-bold flex items-center gap-2">
+                        Montreal <span className="font-mono text-green-400">00:00:00</span>
+                    </div>
+                    <div className="ml-auto text-xs font-mono font-bold text-[var(--color-neon-red)] bg-red-900/20 px-3 py-1 rounded border border-red-800">
+                        OFFLINE IN: {countdown}
+                    </div>
+                </div>
             </div>
-            
-            <h2 className="text-4xl font-black text-white tracking-widest uppercase mb-2">Track is Empty</h2>
-            <p className="text-slate-400 text-lg mb-10 max-w-md text-center">F1 telemetry servers are online, but there are no cars on the circuit. Waiting for the next official session to begin.</p>
-            
-            <div className="bg-[#0F131D] border border-slate-700/50 px-12 py-6 rounded-xl flex flex-col items-center shadow-2xl relative overflow-hidden group">
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
-                <span className="text-xs font-bold tracking-[0.3em] text-[var(--color-neon-red)] uppercase mb-3">Next Event Starts In</span>
-                <span className="text-5xl font-black tracking-tight text-white font-mono drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]">
-                    {countdown}
-                </span>
+
+            {/* Static Map View */}
+            <div className="bg-[#0F131D] border border-slate-800 rounded-lg h-[300px] relative flex items-center justify-center">
+                 <div className="absolute top-4 right-4 flex items-center gap-2">
+                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Show Corners</span>
+                     <div className="w-8 h-4 bg-blue-600 rounded-full relative cursor-pointer">
+                         <div className="w-3 h-3 bg-white rounded-full absolute right-[2px] top-[2px]"></div>
+                     </div>
+                 </div>
+                 
+                 {/* Dummy Track Path SVG */}
+                 <svg width="60%" height="80%" viewBox="0 0 100 100" preserveAspectRatio="none" className="opacity-40">
+                    <path d="M10,50 Q20,20 50,20 T90,50 Q80,80 50,80 T10,50" fill="none" stroke="#475569" strokeWidth="2" />
+                    {/* Dummy Corners */}
+                    <circle cx="10" cy="50" r="3" fill="#0F131D" stroke="#fff" strokeWidth="1" />
+                    <text x="10" y="45" fill="#fff" fontSize="4" textAnchor="middle">1</text>
+                 </svg>
             </div>
-            
-            {/* Background Logo */}
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-[0.02]">
-               <h1 className="text-[300px] font-black italic">F1</h1>
+
+            {/* Circular Telemetry / Gaps */}
+            <div className="bg-[#0F131D] border border-slate-800 rounded-lg flex-1 relative flex items-center justify-center min-h-[300px]">
+                <div className="w-48 h-48 rounded-full border border-slate-600 relative flex items-center justify-center">
+                    <div className="w-24 h-24 rounded-full border border-slate-700/50"></div>
+                    
+                    {/* Dummy Cars on Circle */}
+                    <div className="absolute top-[-10px] left-1/2 -translate-x-1/2 flex flex-col items-center">
+                        <span className="text-[8px] font-bold text-slate-400 mb-1">IN PIT</span>
+                        <div className="w-6 h-6 rounded-full border-2 border-[#E80020] bg-slate-900 text-[8px] font-bold text-white flex items-center justify-center">LEC</div>
+                    </div>
+                    
+                    <div className="absolute bottom-[-10px] right-4 flex flex-col items-center">
+                        <div className="w-6 h-6 rounded-full border-2 border-[#3671C6] bg-slate-900 text-[8px] font-bold text-white flex items-center justify-center">VER</div>
+                    </div>
+                </div>
             </div>
-        </div>
+        </>
       )}
     </div>
   );
