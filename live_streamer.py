@@ -8,6 +8,9 @@ import time
 import pandas as pd
 import fastf1
 from fastf1.livetiming.client import SignalRClient
+import threading
+import datetime
+import urllib.request
 
 logging.basicConfig(level=logging.INFO)
 connected_clients = set()
@@ -16,6 +19,22 @@ connected_clients = set()
 if not os.path.exists("fastf1_cache"):
     os.makedirs("fastf1_cache")
 fastf1.Cache.enable_cache("fastf1_cache")
+
+def get_upcoming_race():
+    """Fetches the upcoming race data from Ergast API."""
+    try:
+        url = "https://api.jolpi.ca/ergast/f1/current/next.json"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            races = data.get('MRData', {}).get('RaceTable', {}).get('Races', [])
+            if races:
+                race_name = races[0].get('raceName', 'Formula 1 Grand Prix')
+                logging.info(f"Upcoming race found: {race_name}")
+                return race_name
+    except Exception as e:
+        logging.error(f"Error fetching upcoming race data from Ergast: {e}")
+    return "Formula 1 Grand Prix"
 
 def fetch_laptimes_sync(year, gp, session_type):
     session = fastf1.get_session(year, gp, session_type)
@@ -32,7 +51,7 @@ def fetch_laptimes_sync(year, gp, session_type):
     return results
 
 async def handle_get_laptimes(websocket, req):
-    year = req.get("year", 2023)
+    year = req.get("year", 2024)
     gp = req.get("gp", "Monaco")
     sess = req.get("session", "R")
     try:
@@ -61,7 +80,7 @@ def fetch_telemetry_sync(year, gp, session_type, driver):
     return results
 
 async def handle_get_telemetry(websocket, req):
-    year = req.get("year", 2023)
+    year = req.get("year", 2024)
     gp = req.get("gp", "Monaco")
     sess = req.get("session", "Q")
     driver = req.get("driver", "VER")
@@ -70,7 +89,6 @@ async def handle_get_telemetry(websocket, req):
         await websocket.send(json.dumps({"topic": "TelemetryData", "data": results, "driver": driver}))
     except Exception as e:
         await websocket.send(json.dumps({"topic": "Error", "data": str(e)}))
-
 
 async def handler(websocket):
     connected_clients.add(websocket)
@@ -189,232 +207,164 @@ async def tail_file_and_broadcast(filename):
             except Exception as e:
                 logging.error(f"Error parsing line: {e}")
 
-import threading
-
 def _run_fastf1_client_thread(filename):
     try:
-        # FastF1 client internally uses asyncio.run, which conflicts with our main loop
-        # Running it in a separate thread fixes the "asyncio.run() cannot be called from a running event loop" error
         client = SignalRClient(filename, timeout=60)
         client.start()
     except Exception as e:
         logging.error(f"F1 Client thread error: {e}")
 
+async def simulate_live_stream(race_name, track_map_coords):
+    """Fallback: Generates highly realistic F1 data to keep the dashboard alive."""
+    logging.info("Starting highly realistic simulated local WebSocket stream...")
+    
+    drivers = ["VER", "PER", "HAM", "RUS", "LEC", "SAI", "NOR", "PIA", "ALO", "STR", 
+               "GAS", "OCO", "ALB", "SAR", "BOT", "ZHO", "MAG", "HUL", "TSU", "RIC"]
+               
+    sim_state = {}
+    for i, drv in enumerate(drivers):
+        base_s1 = 28.500 + (i * 0.1)
+        base_s2 = 30.100 + (i * 0.1)
+        base_s3 = 24.900 + (i * 0.1)
+        base_lap = base_s1 + base_s2 + base_s3
+        
+        sim_state[drv] = {
+            "pos_index": (len(track_map_coords) // 20) * i if track_map_coords else 0,
+            "base_s1": base_s1, "base_s2": base_s2, "base_s3": base_s3, "base_lap": base_lap,
+            "best_lap": base_lap,
+            "lap_count": 0,
+            "tire": "SOFT" if i % 3 == 0 else "MEDIUM" if i % 2 == 0 else "HARD",
+            "gap": sum((0.2 * j) for j in range(i+1)),
+            "interval": 0.2 + (i * 0.05)
+        }
+
+    while True:
+        if connected_clients:
+            session_info = {
+                "topic": "SessionInfo",
+                "data": {
+                    "name": f"{race_name or 'Formula 1'} - Live Timing (Simulated)",
+                    "status": "Green",
+                    "lap": sim_state["VER"]["lap_count"] + 1,
+                    "totalLaps": 70
+                }
+            }
+            websockets.broadcast(connected_clients, json.dumps(session_info))
+
+            for i, drv in enumerate(drivers):
+                state = sim_state[drv]
+                
+                if track_map_coords:
+                    state["pos_index"] = (state["pos_index"] + 1) % len(track_map_coords)
+                    pos = track_map_coords[state["pos_index"]]
+                    websockets.broadcast(connected_clients, json.dumps({
+                        "topic": "Position",
+                        "data": {"driver": drv, "x": pos["x"], "y": pos["y"]}
+                    }))
+                
+                if state["pos_index"] == 0 or not track_map_coords:
+                    state["lap_count"] += 1
+                    
+                    var1 = (math.sin(time.time() + i) * 0.1)
+                    var2 = (math.cos(time.time() + i) * 0.1)
+                    var3 = (math.sin(time.time() * 2 + i) * 0.1)
+                    
+                    s1 = state["base_s1"] + var1
+                    s2 = state["base_s2"] + var2
+                    s3 = state["base_s3"] + var3
+                    last_lap = s1 + s2 + s3
+                    
+                    if last_lap < state["best_lap"]:
+                        state["best_lap"] = last_lap
+
+                    def fmt(sec):
+                        m = int(sec // 60)
+                        s = sec % 60
+                        return f"{m}:{s:06.3f}" if m > 0 else f"{s:06.3f}"
+
+                    timing_data = {
+                        "topic": "TimingData",
+                        "data": {
+                            "driver": drv,
+                            "position": i + 1,
+                            "lap": state["lap_count"],
+                            "bestLap": fmt(state["best_lap"]),
+                            "lastLap": fmt(last_lap),
+                            "s1": f"{s1:.3f}",
+                            "s2": f"{s2:.3f}",
+                            "s3": f"{s3:.3f}",
+                            "gapToLeader": f"+{state['gap']:.3f}" if i > 0 else "",
+                            "interval": f"+{state['interval']:.3f}" if i > 0 else "",
+                            "pitStatus": "",
+                            "tire": state["tire"]
+                        }
+                    }
+                    websockets.broadcast(connected_clients, json.dumps(timing_data))
+                    
+                # Send Telemetry Data for some drivers
+                if i < 2:
+                    simulated_telemetry = {
+                        "topic": "Telemetry",
+                        "data": {
+                            "driver": drv,
+                            "time": time.time(),
+                            "speed": 300 - (i * 2) + (math.sin(time.time()) * 10),
+                            "throttle": 100 if (int(time.time()) % 10) < 6 else 0,
+                            "brake": False if (int(time.time()) % 10) < 6 else True,
+                            "nGear": 8 if (int(time.time()) % 10) < 6 else 3
+                        }
+                    }
+                    websockets.broadcast(connected_clients, json.dumps(simulated_telemetry))
+
+        await asyncio.sleep(0.5)
+
 async def fastf1_live_bridge():
-    """
-    Connects to the real FastF1 SignalR client and tails the output file.
-    """
     filename = 'live_timing_data.txt'
     if os.path.exists(filename):
         os.remove(filename)
 
     logging.info("Attempting to connect to real FastF1 SignalR Live Timing...")
-    try:
-        # Start the real connection to F1 servers in a background thread
-        t = threading.Thread(target=_run_fastf1_client_thread, args=(filename,), daemon=True)
-        t.start()
-        
-        # Wait a moment for the connection to establish and create the file
-        await asyncio.sleep(3)
-        
-        if not t.is_alive():
-            raise Exception("FastF1 client thread crashed on startup (F1 Live Timing is likely offline).")
-        
-        asyncio.create_task(tail_file_and_broadcast(filename))
-        
-        # Keep the connection alive
-        while True:
-            if not t.is_alive():
-                raise Exception("FastF1 client thread died unexpectedly.")
-            await asyncio.sleep(1)
-            
-    except Exception as e:
-        logging.warning(f"FastF1 connection failed/skipped: {e}. Falling back to simulation loop.")
-        await simulate_live_stream()
-
-upcoming_race = None
-track_layout = []
-
-def fetch_upcoming_race():
-    global upcoming_race, track_layout
-    try:
-        import urllib.request
-        from datetime import datetime
-        res = urllib.request.urlopen('https://api.jolpi.ca/ergast/f1/current.json')
-        data = json.loads(res.read())
-        races = data['MRData']['RaceTable']['Races']
-        now_str = datetime.utcnow().isoformat() + "Z"
-        
-        for race in races:
-            race_time_str = race['date'] + "T" + race.get('time', '00:00:00Z')
-            if race_time_str > now_str:
-                upcoming_race = race
-                break
-        if not upcoming_race:
-            upcoming_race = races[-1]
-            
-        logging.info(f"Upcoming race found: {upcoming_race['raceName']}")
-        
-        # Load track layout using fastf1 (use 2023 for reliable offline cache)
-        gp = upcoming_race['Circuit']['circuitName']
-        if 'Albert Park' in gp: gp = 'Australia' # FastF1 name mapping
-        elif 'Miami' in gp: gp = 'Miami'
-        elif 'Circuit de Monaco' in gp: gp = 'Monaco'
-        elif 'Circuit Gilles-Villeneuve' in gp: gp = 'Canada'
-        elif 'Red Bull Ring' in gp: gp = 'Austria'
-        elif 'Silverstone' in gp: gp = 'Great Britain'
-        elif 'Hungaroring' in gp: gp = 'Hungary'
-        elif 'Spa' in gp: gp = 'Belgium'
-        elif 'Zandvoort' in gp: gp = 'Netherlands'
-        elif 'Monza' in gp: gp = 'Italy'
-        elif 'Baku' in gp: gp = 'Azerbaijan'
-        elif 'Marina Bay' in gp: gp = 'Singapore'
-        elif 'Suzuka' in gp: gp = 'Japan'
-        elif 'Lusail' in gp: gp = 'Qatar'
-        elif 'Austin' in gp: gp = 'United States'
-        elif 'Hermanos Rodriguez' in gp: gp = 'Mexico'
-        elif 'Interlagos' in gp: gp = 'Brazil'
-        elif 'Las Vegas' in gp: gp = 'Las Vegas'
-        elif 'Yas Marina' in gp: gp = 'Abu Dhabi'
-        elif 'Jeddah' in gp: gp = 'Saudi Arabia'
-        elif 'Bahrain' in gp: gp = 'Bahrain'
-        
+    race_name = get_upcoming_race()
+    
+    track_map_coords = []
+    if race_name:
         try:
-            logging.info(f"Loading track map for {gp}...")
-            session = fastf1.get_session(2023, gp, 'Q')
+            logging.info(f"Loading track map for {race_name}...")
+            year = datetime.datetime.utcnow().year
+            session = fastf1.get_session(year, race_name, "Q")
             session.load(telemetry=True, weather=False, messages=False)
             lap = session.laps.pick_fastest()
             tel = lap.get_telemetry()
-            # Downsample
-            tel = tel.iloc[::max(1, len(tel)//150)]
             for index, row in tel.iterrows():
-                track_layout.append({"x": float(row['X']), "y": float(row['Y'])})
-            logging.info(f"Loaded {len(track_layout)} track coordinates.")
+                if index % 5 == 0:
+                    track_map_coords.append({"x": row['X'], "y": row['Y']})
+            logging.info(f"Loaded {len(track_map_coords)} track coordinates.")
         except Exception as e:
-            logging.error(f"Failed to load track map: {e}")
-            track_layout = []
+            logging.error(f"Error loading track map: {e}")
+
+    try:
+        t = threading.Thread(target=_run_fastf1_client_thread, args=(filename,))
+        t.daemon = True
+        t.start()
+        
+        await asyncio.sleep(10)
+        
+        if not t.is_alive() or (os.path.exists(filename) and os.path.getsize(filename) == 0):
+            logging.warning("FastF1 connected but receiving 0 bytes (Live Timing is offline). Falling back to simulation.")
+            asyncio.create_task(simulate_live_stream(race_name, track_map_coords))
+        else:
+            logging.info("FastF1 is actively receiving data. Tailing real live stream.")
+            asyncio.create_task(tail_file_and_broadcast(filename))
             
     except Exception as e:
-        logging.error(f"Failed to fetch upcoming race: {e}")
-        upcoming_race = {"season": "2026", "raceName": "Simulated Grand Prix", "date": "2026-12-31"}
-
-async def simulate_live_stream():
-    """Simulates the incoming WebSocket data structure and broadcasts it."""
-    logging.info("Starting simulated local WebSocket stream...")
-    
-    if not upcoming_race:
-        # Run synchronous fetch in a thread so it doesn't block startup
-        await asyncio.to_thread(fetch_upcoming_race)
-    
-    # 20 drivers to test the dynamic leaderboard mapping
-    drivers = [
-        "VER", "PER", "HAM", "RUS", "LEC", "SAI", 
-        "NOR", "PIA", "ALO", "STR", "GAS", "OCO", 
-        "ALB", "SAR", "BOT", "ZHO", "MAG", "HUL", 
-        "TSU", "RIC"
-    ]
-    
-    start_time = time.time()
-    
-    while True:
-        current_time = time.time() - start_time
-        
-        if connected_clients:
-            # Session & Weather Data
-            session_data = {
-                "topic": "SessionInfo",
-                "data": {
-                    "name": upcoming_race['raceName'].upper() if upcoming_race else "FORMULA 1 GRAND PRIX",
-                    "status": "Green",
-                    "lap": int(current_time / 60) + 1,
-                    "totalLaps": int(upcoming_race.get('Circuit', {}).get('totalLaps', 68)) if upcoming_race else 68
-                }
-            }
-            websockets.broadcast(connected_clients, json.dumps(session_data))
-
-            weather_data = {
-                "topic": "WeatherData",
-                "data": {
-                    "airTemp": 22.5 + math.sin(current_time * 0.1),
-                    "trackTemp": 34.2 + math.sin(current_time * 0.05) * 2,
-                    "humidity": 45,
-                    "windSpeed": 12,
-                    "rainfall": False
-                }
-            }
-            websockets.broadcast(connected_clients, json.dumps(weather_data))
-            
-            # Timing Data
-            for i, drv in enumerate(drivers):
-                is_pit = (i % 5 == 0 and int(current_time) % 120 < 15)
-                tire_compound = "SOFT" if i % 3 == 0 else "MEDIUM" if i % 2 == 0 else "HARD"
-                
-                simulated_timing = {
-                    "topic": "TimingData",
-                    "data": {
-                        "driver": drv,
-                        "position": i + 1,
-                        "lap": int(current_time / 60) + 1,
-                        "bestLap": f"1:13.{900 + i*10:03d}",
-                        "lastLap": f"1:14.{100 + i*10 + int(math.sin(current_time)*10):03d}" if not is_pit else "",
-                        "s1": f"28.{532 + i*10 + int(math.sin(current_time)*10):03d}" if not is_pit else "",
-                        "s2": f"30.{111 + i*5 + int(math.cos(current_time)*5):03d}" if not is_pit else "",
-                        "s3": f"24.{992 + i*2 + int(math.sin(current_time*2)*2):03d}" if not is_pit else "",
-                        "gapToLeader": f"+{i * 0.8 + (math.sin(current_time*0.1)*i*0.1):.3f}" if i > 0 else "",
-                        "interval": f"+{0.8 + (math.sin(current_time*0.1)*0.1):.3f}" if i > 0 else "",
-                        "pitStatus": "IN PIT" if is_pit else "",
-                        "tire": tire_compound
-                    }
-                }
-                websockets.broadcast(connected_clients, json.dumps(simulated_timing))
-            
-            # Telemetry Data
-            for _ in range(2): 
-                for i, drv in enumerate(drivers):
-                    simulated_telemetry = {
-                        "topic": "Telemetry",
-                        "data": {
-                            "driver": drv,
-                            "time": current_time,
-                            "speed": 300 - (i * 2) + (math.sin(current_time) * 10),
-                            "rpm": 11000 + (math.sin(current_time) * 500),
-                            "gear": 8
-                        }
-                    }
-                    websockets.broadcast(connected_clients, json.dumps(simulated_telemetry))
-                await asyncio.sleep(0.5)
-
-            # Track Position (Plotly X/Y)
-            for i, drv in enumerate(drivers):
-                if track_layout:
-                    # Move around the actual track coords
-                    speed = 2.0  # indices per second
-                    track_idx = int((current_time * speed) - (i * 5)) % len(track_layout)
-                    x = track_layout[track_idx]['x']
-                    y = track_layout[track_idx]['y']
-                else:
-                    # Fallback Figure 8 track shape
-                    track_progress = (current_time * 0.5) - (i * 0.2)
-                    x = 500 * math.sin(track_progress)
-                    y = 200 * math.sin(track_progress * 2)
-                
-                simulated_position = {
-                    "topic": "Position",
-                    "data": { "driver": drv, "x": x, "y": y }
-                }
-                websockets.broadcast(connected_clients, json.dumps(simulated_position))
-        else:
-            await asyncio.sleep(2)
+        logging.error(f"Failed to start live stream bridge: {e}")
+        asyncio.create_task(simulate_live_stream(race_name, track_map_coords))
 
 async def main():
-    port = int(os.environ.get("PORT", 8765))
-    server = await websockets.serve(handler, "0.0.0.0", port)
-    logging.info(f"WebSocket Server running on ws://0.0.0.0:{port}")
-    
-    await fastf1_live_bridge()
+    asyncio.create_task(fastf1_live_bridge())
+    async with websockets.serve(handler, "0.0.0.0", 8765):
+        logging.info("WebSocket Server running on ws://0.0.0.0:8765")
+        await asyncio.Future()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logging.info("Live streamer stopped.")
+    asyncio.run(main())
