@@ -20,58 +20,74 @@ export function useF1Telemetry() {
   const [telemetryState, setTelemetryState] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
-    // Connect to the local python fastf1 backend
-    const ws = new WebSocket('ws://localhost:8765');
-    
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        
-        if (message.topic === 'TrackMap') {
-            setTrackCoords(message.data);
-        }
-        else if (message.topic === 'TimingData') {
-          setTimingData((prev) => {
-            const updated = [...prev];
-            const idx = updated.findIndex(d => d.driver === message.data.driver);
-            if (idx >= 0) updated[idx] = message.data;
-            else updated.push(message.data);
-            return updated.sort((a,b) => a.position - b.position);
-          });
-        }
-        else if (message.topic === 'Position') {
-          setTrackPositions(prev => ({
-            ...prev,
-            [message.data.driver]: message.data
-          }));
-        }
-        else if (message.topic === 'SessionInfo') {
-          setSessionInfo(message.data);
-        }
-        else if (message.topic === 'WeatherData') {
-          setWeatherData(message.data);
-        }
-        else if (message.topic === 'Telemetry') {
-          const driver = message.data.driver;
-          if (!telemetryBufferRef.current[driver]) {
-            telemetryBufferRef.current[driver] = [];
-          }
-          telemetryBufferRef.current[driver].push(message.data);
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout;
+
+    const connect = () => {
+      ws = new WebSocket('ws://localhost:8765');
+      
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
           
-          if (telemetryBufferRef.current[driver].length > 500) {
-            telemetryBufferRef.current[driver].shift();
+          if (message.topic === 'TrackMap') {
+              setTrackCoords(message.data);
           }
+          else if (message.topic === 'TimingData') {
+            setTimingData((prev) => {
+              const updated = [...prev];
+              const idx = updated.findIndex(d => d.driver === message.data.driver);
+              if (idx >= 0) updated[idx] = message.data;
+              else updated.push(message.data);
+              return updated.sort((a,b) => a.position - b.position);
+            });
+          }
+          else if (message.topic === 'Position') {
+            setTrackPositions(prev => ({
+              ...prev,
+              [message.data.driver]: message.data
+            }));
+          }
+          else if (message.topic === 'SessionInfo') {
+            setSessionInfo(message.data);
+          }
+          else if (message.topic === 'WeatherData') {
+            setWeatherData(message.data);
+          }
+          else if (message.topic === 'Telemetry') {
+            const driver = message.data.driver;
+            if (!telemetryBufferRef.current[driver]) {
+              telemetryBufferRef.current[driver] = [];
+            }
+            telemetryBufferRef.current[driver].push(message.data);
+            
+            if (telemetryBufferRef.current[driver].length > 500) {
+              telemetryBufferRef.current[driver].shift();
+            }
+          }
+          else if (message.topic === 'RaceControl') {
+            setRaceControlMsgs(prev => [message.data, ...prev].slice(0, 50));
+          }
+          else if (message.topic === 'TeamRadio') {
+            setTeamRadioMsgs(prev => [message.data, ...prev].slice(0, 50));
+          }
+        } catch (err) {
+          console.error("WS Parse error", err);
         }
-        else if (message.topic === 'RaceControl') {
-          setRaceControlMsgs(prev => [message.data, ...prev].slice(0, 50));
-        }
-        else if (message.topic === 'TeamRadio') {
-          setTeamRadioMsgs(prev => [message.data, ...prev].slice(0, 50));
-        }
-      } catch (err) {
-        console.error("WS Parse error", err);
-      }
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket disconnected. Reconnecting in 3s...");
+        reconnectTimeout = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err);
+        ws?.close();
+      };
     };
+
+    connect();
 
     const interval = setInterval(() => {
       setTelemetryState(current => {
@@ -84,7 +100,11 @@ export function useF1Telemetry() {
     }, 500);
 
     return () => {
-      ws.close();
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
+      clearTimeout(reconnectTimeout);
       clearInterval(interval);
     };
   }, []);

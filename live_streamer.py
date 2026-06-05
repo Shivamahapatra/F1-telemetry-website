@@ -244,7 +244,7 @@ async def simulate_live_stream(race_name, track_map_coords):
         session.load(telemetry=False, weather=False, messages=True)
         results = session.results
         laps = session.laps
-        messages = session.messages
+        messages = session.race_control_messages
         
         sim_state = {}
         for count, (idx, row) in enumerate(results.iterrows()):
@@ -301,7 +301,7 @@ async def simulate_live_stream(race_name, track_map_coords):
     except Exception as e:
         logging.error(f"Error loading real 2025 data: {e}")
         drivers = ["VER", "PER", "HAM", "RUS", "LEC", "SAI", "NOR", "PIA", "ALO", "STR", "GAS", "OCO", "ALB", "SAR", "BOT", "ZHO", "MAG", "HUL", "TSU", "RIC"]
-        sim_state = {drv: {"position": i+1, "lap_time": "1:15.000", "gap": "+0.000", "interval": "+0.000", "tire": "Soft", "pos_index": i*5, "lap_count": 0} for i, drv in enumerate(drivers)}
+        sim_state = {drv: {"position": i+1, "lap_time": "1:15.000", "gap": "+0.000", "interval": "+0.000", "tire": "SOFT", "pos_index": i*5, "lap_count": 0, "s1": "25.100", "s2": "30.200", "s3": "20.100"} for i, drv in enumerate(drivers)}
         race_control = []
         team_radio = []
 
