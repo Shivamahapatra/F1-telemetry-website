@@ -5,6 +5,7 @@ export function useF1Telemetry() {
   const [trackPositions, setTrackPositions] = useState<Record<string, any>>({});
   const [sessionInfo, setSessionInfo] = useState<any>({});
   const [weatherData, setWeatherData] = useState<any>({});
+  const [trackCoords, setTrackCoords] = useState<any[]>([]);
   
   const [selectedDrivers, setSelectedDrivers] = useState<string[]>(['VER', 'HAM']);
   const selectedDriversRef = useRef<string[]>(['VER', 'HAM']);
@@ -24,7 +25,10 @@ export function useF1Telemetry() {
       try {
         const message = JSON.parse(event.data);
         
-        if (message.topic === 'TimingData') {
+        if (message.topic === 'TrackMap') {
+            setTrackCoords(message.data);
+        }
+        else if (message.topic === 'TimingData') {
           setTimingData((prev) => {
             const updated = [...prev];
             const idx = updated.findIndex(d => d.driver === message.data.driver);
@@ -77,5 +81,5 @@ export function useF1Telemetry() {
     };
   }, []);
 
-  return { timingData, telemetryState, trackPositions, sessionInfo, weatherData, selectedDrivers, setSelectedDrivers };
+  return { timingData, telemetryState, trackPositions, sessionInfo, weatherData, selectedDrivers, setSelectedDrivers, trackCoords };
 }

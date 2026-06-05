@@ -19,12 +19,22 @@ const teamColors: Record<string, string> = {
 };
 
 export default function DynamicMapPlot() {
-  const { trackPositions, timingData, sessionInfo } = useF1Telemetry();
+  const { trackPositions, timingData, sessionInfo, trackCoords } = useF1Telemetry();
 
   const drivers = timingData.length > 0 ? timingData.map(d => d.driver) : Object.keys(teamColors);
 
   const plotData = useMemo(() => {
-    return drivers.map(drv => {
+    const trackTrace = {
+      x: trackCoords?.map(p => p.x) || [],
+      y: trackCoords?.map(p => p.y) || [],
+      type: 'scatter',
+      mode: 'lines',
+      name: 'Track',
+      line: { color: 'rgba(255,255,255,0.3)', width: 4 },
+      hoverinfo: 'none'
+    };
+
+    const driverTraces = drivers.map(drv => {
       const pos = trackPositions[drv];
       const color = teamColors[drv] || "#ffffff";
       
@@ -55,7 +65,9 @@ export default function DynamicMapPlot() {
         hoverinfo: 'name'
       };
     });
-  }, [trackPositions, drivers]);
+
+    return [trackTrace, ...driverTraces];
+  }, [trackPositions, drivers, trackCoords]);
 
   const layout = {
     paper_bgcolor: 'rgba(0,0,0,0)',
