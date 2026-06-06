@@ -11,6 +11,8 @@ from fastf1.livetiming.client import SignalRClient
 import threading
 import datetime
 import urllib.request
+import http
+
 
 def format_lap_time(val):
     if pd.isnull(val):
@@ -754,12 +756,18 @@ async def fastf1_live_bridge():
         global_state["is_live"] = False
         asyncio.create_task(simulate_live_stream(race_name, global_track_map))
 
+async def health_check(path, request_headers):
+    if "upgrade" not in request_headers.get("Upgrade", "").lower():
+        return http.HTTPStatus.OK, [("Content-Type", "text/plain")], b"OK"
+    return None
+
 async def main():
     asyncio.create_task(fastf1_live_bridge())
     port = int(os.environ.get("PORT", 8765))
-    async with websockets.serve(handler, "0.0.0.0", port):
+    async with websockets.serve(handler, "0.0.0.0", port, process_request=health_check):
         logging.info(f"WebSocket Server running on ws://0.0.0.0:{port}")
         await asyncio.Future()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
