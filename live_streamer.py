@@ -757,29 +757,34 @@ async def fastf1_live_bridge():
         asyncio.create_task(simulate_live_stream(race_name, global_track_map))
 
 async def health_check(path, request_headers):
-    logging.info(f"--- Handshake Request ---")
-    logging.info(f"Path: {path}")
-    logging.info(f"Headers: {dict(request_headers)}")
+    print(f"[HEALTH_CHECK] Incoming request: path={path}", flush=True)
+    print(f"[HEALTH_CHECK] Headers: {dict(request_headers)}", flush=True)
     
     upgrade = request_headers.get("Upgrade", "")
     connection = request_headers.get("Connection", "")
     key = request_headers.get("Sec-WebSocket-Key", "")
     version = request_headers.get("Sec-WebSocket-Version", "")
     
-    logging.info(f"Upgrade: {upgrade}")
-    logging.info(f"Connection: {connection}")
-    logging.info(f"Sec-WebSocket-Key: {key}")
-    logging.info(f"Sec-WebSocket-Version: {version}")
-    
     # If a WebSocket key is present, force standard headers to bypass proxy stripping
     if key:
-        logging.info("WebSocket handshake detected, normalizing Upgrade and Connection headers...")
+        print("[HEALTH_CHECK] WebSocket handshake detected, normalizing Upgrade and Connection headers...", flush=True)
         request_headers["Connection"] = "Upgrade"
         request_headers["Upgrade"] = "websocket"
+        
+        # Log validation issues to stdout for debugging
+        if not any(token.strip() == "upgrade" for token in connection.lower().split(",")):
+            print(f"[HEALTH_CHECK] WARNING: Original Connection header did not contain 'upgrade': '{connection}'", flush=True)
+        if upgrade.lower() != "websocket":
+            print(f"[HEALTH_CHECK] WARNING: Original Upgrade header was not 'websocket': '{upgrade}'", flush=True)
+        if version != "13":
+            print(f"[HEALTH_CHECK] WARNING: Sec-WebSocket-Version is not '13': '{version}'", flush=True)
+            
+        print("[HEALTH_CHECK] Handshake allowed to proceed", flush=True)
         return None
         
-    logging.info("Non-upgrade request, returning 200 OK")
+    print("[HEALTH_CHECK] Non-upgrade request, returning 200 OK", flush=True)
     return http.HTTPStatus.OK, [("Content-Type", "text/plain")], b"OK"
+
 
 
 
