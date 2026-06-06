@@ -36,8 +36,7 @@ export default function DynamicMapPlot() {
 
     const driverTraces = drivers.map(drv => {
       const pos = trackPositions[drv];
-      const driverTiming = timingData.find(d => d.driver === drv);
-      const color = driverTiming?.teamColor || teamColors[drv] || "#ffffff";
+      const color = teamColors[drv] || "#ffffff";
       
       const x = pos?.x ?? 0;
       const y = pos?.y ?? 0;
