@@ -286,6 +286,7 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
         
         sim_state = {}
         driver_colors = {}
+        driver_telemetry = {}
         
         # Determine driver positions and colors
         driver_positions = {}
@@ -325,10 +326,14 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
 
         for count, drv in enumerate(driver_positions.keys()):
             # Fetch real S1, S2, S3, LapTime, and Tire from the fastest lap
-            driver_laps = laps.pick_drivers(drv)
+            drv_laps = laps.pick_drivers(drv)
             s1, s2, s3, compound, lap_time = "", "", "", "SOFT", "1:15.000"
-            if not driver_laps.empty:
-                fastest = driver_laps.pick_fastest()
+            best_s1, best_s2, best_s3 = "", "", ""
+            tire_age = 0
+            pitstops = 0
+            
+            if not drv_laps.empty:
+                fastest = drv_laps.pick_fastest()
                 s1 = f"{fastest['Sector1Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector1Time']) else ""
                 s2 = f"{fastest['Sector2Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector2Time']) else ""
                 s3 = f"{fastest['Sector3Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector3Time']) else ""
@@ -336,6 +341,40 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
                 lt = fastest['LapTime']
                 if pd.notnull(lt):
                     lap_time = str(lt).split(' ')[-1][:9]
+                    
+                # Personal best sectors
+                s1_min = drv_laps['Sector1Time'].min()
+                s2_min = drv_laps['Sector2Time'].min()
+                s3_min = drv_laps['Sector3Time'].min()
+                best_s1 = f"{s1_min.total_seconds():.3f}" if pd.notnull(s1_min) else ""
+                best_s2 = f"{s2_min.total_seconds():.3f}" if pd.notnull(s2_min) else ""
+                best_s3 = f"{s3_min.total_seconds():.3f}" if pd.notnull(s3_min) else ""
+                
+                # Tyre Life (age)
+                tyre_life = fastest['TyreLife']
+                tire_age = int(tyre_life) if pd.notnull(tyre_life) else 0
+                
+                # Pitstops (Stints - 1)
+                stint_max = drv_laps['Stint'].max()
+                pitstops = int(stint_max - 1) if pd.notnull(stint_max) and stint_max > 1 else 0
+                
+                # Load telemetry coordinate mapping for high-frequency speed/gear/brake/DRS
+                try:
+                    tel = fastest.get_telemetry()
+                    if tel is not None and not tel.empty:
+                        tel_data = []
+                        for idx_tel, row_val in tel.iterrows():
+                            if idx_tel % 5 == 0:  # downsample
+                                tel_data.append({
+                                    "speed": int(row_val.get("Speed", 0)) if pd.notnull(row_val.get("Speed")) else 0,
+                                    "gear": int(row_val.get("nGear", 0)) if pd.notnull(row_val.get("nGear")) else 0,
+                                    "throttle": int(row_val.get("Throttle", 0)) if pd.notnull(row_val.get("Throttle")) else 0,
+                                    "brake": bool(row_val.get("Brake", False)) if pd.notnull(row_val.get("Brake")) else False,
+                                    "drs": int(row_val.get("DRS", 0)) if pd.notnull(row_val.get("DRS")) else 0
+                                })
+                        driver_telemetry[drv] = tel_data
+                except Exception as tel_err:
+                    logging.warning(f"Could not load telemetry for {drv}: {tel_err}")
             
             if "PRACTICE" in sess_name.upper():
                 gap = ""
@@ -353,9 +392,14 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
                 "s1": s1,
                 "s2": s2,
                 "s3": s3,
+                "bestS1": best_s1,
+                "bestS2": best_s2,
+                "bestS3": best_s3,
                 "gap": gap,
                 "interval": "0.000",
                 "tire": compound,
+                "tireAge": tire_age,
+                "pitstops": pitstops,
                 "pos_index": (count * 5) % len(track_map_coords) if track_map_coords else 0,
                 "lap_count": 0
             }
@@ -403,8 +447,9 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
     except Exception as e:
         logging.error(f"Error loading real session data: {e}")
         drivers = ["VER", "PER", "HAM", "RUS", "LEC", "SAI", "NOR", "PIA", "ALO", "STR", "GAS", "OCO", "ALB", "SAR", "BOT", "ZHO", "MAG", "HUL", "TSU", "RIC"]
-        sim_state = {drv: {"position": i+1, "lap_time": "1:15.000", "gap": "+0.000", "interval": "+0.000", "tire": "SOFT", "pos_index": i*5, "lap_count": 0, "s1": "25.100", "s2": "30.200", "s3": "20.100"} for i, drv in enumerate(drivers)}
+        sim_state = {drv: {"position": i+1, "lap_time": "1:15.000", "gap": "+0.000", "interval": "+0.000", "tire": "SOFT", "tireAge": 3, "pitstops": 1, "pos_index": i*5, "lap_count": 0, "s1": "25.100", "s2": "30.200", "s3": "20.100", "bestS1": "24.900", "bestS2": "29.800", "bestS3": "19.900"} for i, drv in enumerate(drivers)}
         driver_colors = {}
+        driver_telemetry = {}
         race_control = []
         team_radio = []
         weather_list = [{"airTemp": 21.5, "trackTemp": 31.0, "humidity": 55.0, "windSpeed": 4.5, "rainfall": False}]
@@ -448,6 +493,25 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
                         }
                     }))
                 
+                # Retrieve dynamic telemetry
+                tel_list = driver_telemetry.get(drv)
+                speed, gear, throttle, brake, drs = 0, 0, 0, False, 0
+                if tel_list:
+                    tel_idx = int((state["pos_index"] / len(track_map_coords)) * len(tel_list)) % len(tel_list)
+                    t_val = tel_list[tel_idx]
+                    speed = t_val["speed"]
+                    gear = t_val["gear"]
+                    throttle = t_val["throttle"]
+                    brake = t_val["brake"]
+                    drs = t_val["drs"]
+                else:
+                    # Generic simulated speed mapping to position to look natural
+                    speed = 280 - int(abs(pos["x"]) % 120) if track_map_coords else 200
+                    gear = 7 if speed > 220 else (5 if speed > 150 else 3)
+                    throttle = 100 if speed > 200 else 40
+                    brake = speed < 160
+                    drs = 12 if speed > 240 else 0
+                
                 if state["pos_index"] == 0 or not track_map_coords:
                     state["lap_count"] += 1
                     
@@ -473,10 +537,20 @@ async def simulate_live_stream(session, year, gp, sess_name, country, track_map_
                         "s1": state["s1"],
                         "s2": state["s2"],
                         "s3": state["s3"],
+                        "bestS1": state["bestS1"],
+                        "bestS2": state["bestS2"],
+                        "bestS3": state["bestS3"],
                         "gapToLeader": state["gap"],
                         "interval": state["interval"],
                         "pitStatus": "",
                         "tire": state["tire"],
+                        "tireAge": state["tireAge"],
+                        "pitstops": state["pitstops"],
+                        "speed": speed,
+                        "gear": gear,
+                        "throttle": throttle,
+                        "brake": brake,
+                        "drs": drs,
                         "teamColor": driver_colors.get(drv, "#FFFFFF")
                     }
                 }
