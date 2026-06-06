@@ -757,9 +757,31 @@ async def fastf1_live_bridge():
         asyncio.create_task(simulate_live_stream(race_name, global_track_map))
 
 async def health_check(path, request_headers):
-    if "upgrade" not in request_headers.get("Upgrade", "").lower():
-        return http.HTTPStatus.OK, [("Content-Type", "text/plain")], b"OK"
-    return None
+    logging.info(f"--- Handshake Request ---")
+    logging.info(f"Path: {path}")
+    logging.info(f"Headers: {dict(request_headers)}")
+    
+    upgrade = request_headers.get("Upgrade", "")
+    connection = request_headers.get("Connection", "")
+    key = request_headers.get("Sec-WebSocket-Key", "")
+    version = request_headers.get("Sec-WebSocket-Version", "")
+    
+    logging.info(f"Upgrade: {upgrade}")
+    logging.info(f"Connection: {connection}")
+    logging.info(f"Sec-WebSocket-Key: {key}")
+    logging.info(f"Sec-WebSocket-Version: {version}")
+    
+    # If a WebSocket key is present, force standard headers to bypass proxy stripping
+    if key:
+        logging.info("WebSocket handshake detected, normalizing Upgrade and Connection headers...")
+        request_headers["Connection"] = "Upgrade"
+        request_headers["Upgrade"] = "websocket"
+        return None
+        
+    logging.info("Non-upgrade request, returning 200 OK")
+    return http.HTTPStatus.OK, [("Content-Type", "text/plain")], b"OK"
+
+
 
 async def main():
     asyncio.create_task(fastf1_live_bridge())
