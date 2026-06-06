@@ -12,9 +12,58 @@ import threading
 import datetime
 import urllib.request
 
+def format_lap_time(val):
+    if pd.isnull(val):
+        return "-"
+    
+    # If it's a pd.Timedelta (or similar timedelta object)
+    if isinstance(val, pd.Timedelta) or hasattr(val, 'total_seconds'):
+        total_seconds = val.total_seconds()
+    elif isinstance(val, str):
+        val = val.strip()
+        if not val or val in ["-", "NaT", "IN PIT"]:
+            return val
+        # Try parsing standard timedelta representation or "hh:mm:ss.xxx"
+        try:
+            td = pd.to_timedelta(val)
+            total_seconds = td.total_seconds()
+        except Exception:
+            try:
+                parts = val.split(':')
+                if len(parts) == 3:  # hh:mm:ss.xxx
+                    h, m, s = parts
+                    total_seconds = int(h) * 3600 + int(m) * 60 + float(s)
+                elif len(parts) == 2:  # mm:ss.xxx
+                    m, s = parts
+                    total_seconds = int(m) * 60 + float(s)
+                else:
+                    return val
+            except Exception:
+                return val
+    elif isinstance(val, (int, float)):
+        total_seconds = float(val)
+    else:
+        return "-"
+        
+    minutes = int(total_seconds // 60)
+    seconds = total_seconds % 60
+    return f"{minutes}:{seconds:06.3f}"
+
 logging.basicConfig(level=logging.INFO)
 connected_clients = set()
 global_track_map = []
+
+# Global State for Offline vs Live Timing
+global_state = {
+    "is_live": False
+}
+global_offline_data = {
+    "TrackMap": [],
+    "WeatherData": {},
+    "SessionInfo": {},
+    "TimingData": {},
+    "RaceControlData": {}
+}
 
 # Setup FastF1 Cache
 if not os.path.exists("fastf1_cache"):
@@ -101,6 +150,34 @@ async def handle_get_telemetry(websocket, req):
 async def handler(websocket):
     connected_clients.add(websocket)
     logging.info("New frontend client connected!")
+    
+    # If offline, send all cached static data immediately
+    if not global_state.get("is_live", False) and global_offline_data.get("TimingData"):
+        try:
+            if global_offline_data.get("TrackMap"):
+                await websocket.send(json.dumps({"topic": "TrackMap", "data": global_offline_data["TrackMap"]}))
+            if global_offline_data.get("WeatherData"):
+                await websocket.send(json.dumps({"topic": "WeatherData", "data": global_offline_data["WeatherData"]}))
+            if global_offline_data.get("SessionInfo"):
+                await websocket.send(json.dumps({"topic": "SessionInfo", "data": global_offline_data["SessionInfo"]}))
+            if global_offline_data.get("RaceControlData"):
+                await websocket.send(json.dumps({"topic": "RaceControlData", "data": global_offline_data["RaceControlData"]}))
+            for drv, data in global_offline_data["TimingData"].items():
+                await websocket.send(json.dumps({"topic": "TimingData", "data": data}))
+            logging.info("Sent static offline data to newly connected client.")
+        except Exception as e:
+            logging.error(f"Error sending static offline data to client: {e}")
+    else:
+        # Fallback to sending track map
+        if global_track_map:
+            try:
+                await websocket.send(json.dumps({
+                    "topic": "TrackMap",
+                    "data": global_track_map
+                }))
+                logging.info("Sent TrackMap to newly connected client.")
+            except Exception as e:
+                logging.error(f"Error sending TrackMap to new client: {e}")
     try:
         async for message in websocket:
             try:
@@ -172,9 +249,13 @@ async def tail_file_and_broadcast(filename, replay_mode=False):
                                 state["position"] = int(car_data["Position"])
                             except: pass
                         if "BestLapTime" in car_data and isinstance(car_data["BestLapTime"], dict):
-                            state["bestLap"] = car_data["BestLapTime"].get("Value", state["bestLap"])
+                            val = car_data["BestLapTime"].get("Value")
+                            if val:
+                                state["bestLap"] = format_lap_time(val)
                         if "LastLapTime" in car_data and isinstance(car_data["LastLapTime"], dict):
-                            state["lastLap"] = car_data["LastLapTime"].get("Value", state["lastLap"])
+                            val = car_data["LastLapTime"].get("Value")
+                            if val:
+                                state["lastLap"] = format_lap_time(val)
                         if "GapToLeader" in car_data:
                             state["gapToLeader"] = car_data["GapToLeader"]
                         if "IntervalToPositionAhead" in car_data and isinstance(car_data["IntervalToPositionAhead"], dict):
@@ -203,7 +284,6 @@ async def tail_file_and_broadcast(filename, replay_mode=False):
                             "data": { "driver": drv, "x": p.get("X"), "y": p.get("Y") }
                         }
                         websockets.broadcast(connected_clients, json.dumps(broadcast_data))
-                        websockets.broadcast(connected_clients, json.dumps(broadcast_data))
                         
                 elif topic == "Streaming" and msg.get("SessionInfo"):
                     session = msg["SessionInfo"]
@@ -226,6 +306,7 @@ async def tail_file_and_broadcast(filename, replay_mode=False):
                 pass
             except Exception as e:
                 logging.error(f"Error parsing line: {e}")
+
 def _run_fastf1_client_thread(filename):
     try:
         client = SignalRClient(filename, timeout=10)
@@ -233,356 +314,415 @@ def _run_fastf1_client_thread(filename):
     except Exception as e:
         logging.error(f"F1 Client thread error: {e}")
 
-def get_latest_session_details():
-    """Finds and returns the latest session that has data."""
-    year = datetime.datetime.utcnow().year
-    race_name = get_upcoming_race()
+async def simulate_live_stream(race_name, track_map_coords):
+    logging.info("Starting historical replay simulation stream using Practice 2 data...")
     
-    # Try current year sessions first
-    try:
-        event = fastf1.get_event(year, race_name)
-    except Exception as e:
-        logging.error(f"Error getting event: {e}")
-        # Fallback to Monaco
-        race_name = "Monaco Grand Prix"
-        event = fastf1.get_event(year, race_name)
+    # Try loading 2026, then 2025 Monaco Practice 2
+    session = None
+    for year in [2026, 2025]:
+        try:
+            logging.info(f"Fetching real {year} Monaco GP Practice 2 data for replay...")
+            session = fastf1.get_session(year, "Monaco Grand Prix", "Practice 2")
+            # Load with messages=True to retrieve steward warnings, flags, and investigations
+            session.load(telemetry=True, weather=True, messages=True)
+            break
+        except Exception as e:
+            logging.error(f"Error loading {year} Practice 2: {e}")
+            
+    if not session:
+        logging.error("Failed to load any Monaco GP Practice 2 data!")
+        return
         
-    country = event.get('Country', 'Monaco')
-    now = datetime.datetime.now(datetime.timezone.utc)
+    laps = session.laps
     
-    for i in range(5, 0, -1):
-        sess_name = event.get(f"Session{i}")
-        sess_date = event.get(f"Session{i}DateUtc")
-        if sess_name and pd.notnull(sess_date):
-            sess_date_utc = pd.Timestamp(sess_date).tz_localize(None).tz_localize(datetime.timezone.utc)
-            if now >= sess_date_utc:
-                try:
-                    session = fastf1.get_session(year, race_name, sess_name)
-                    session.load(telemetry=False, weather=False, messages=False)
-                    if session.laps is not None and len(session.laps) > 0:
-                        logging.info(f"Selected latest session: {year} {race_name} - {sess_name}")
-                        return session, year, race_name, sess_name, country
-                except Exception as e:
-                    logging.warning(f"Could not load {sess_name}: {e}")
-                    
-    # Fallback to previous year's Race
-    fallback_year = year - 1
-    logging.info(f"No completed sessions found for {year} {race_name}. Falling back to {fallback_year} Monaco Grand Prix Race.")
-    try:
-        session = fastf1.get_session(fallback_year, "Monaco Grand Prix", "R")
-        session.load(telemetry=False, weather=False, messages=False)
-        return session, fallback_year, "Monaco Grand Prix", "Race", "Monaco"
-    except Exception as e:
-        logging.error(f"Failed to load fallback 2025 Monaco session: {e}")
-        return None, fallback_year, "Monaco Grand Prix", "Race", "Monaco"
-
-async def simulate_live_stream(session, year, gp, sess_name, country, track_map_coords):
-    logging.info(f"Starting historical replay simulation stream for {year} {gp} - {sess_name}...")
+    # Sort drivers by their fastest lap time in the session
+    driver_fastest = []
+    for drv in session.drivers:
+        drv_laps = laps.pick_drivers(drv)
+        if not drv_laps.empty:
+            fastest_lap = drv_laps.pick_fastest()
+            lt = fastest_lap['LapTime']
+            abbr = session.get_driver(drv)['Abbreviation']
+            driver_fastest.append({
+                'Driver': abbr,
+                'LapTime': lt if pd.notnull(lt) else pd.NaT,
+                'drv_code': drv
+            })
+            
+    driver_fastest.sort(key=lambda x: x['LapTime'] if pd.notnull(x['LapTime']) else pd.Timedelta(days=99))
     
+    # Session best sectors
+    session_best_s1 = laps['Sector1Time'].min().total_seconds() if not laps['Sector1Time'].empty else 19.0
+    session_best_s2 = laps['Sector2Time'].min().total_seconds() if not laps['Sector2Time'].empty else 34.0
+    session_best_s3 = laps['Sector3Time'].min().total_seconds() if not laps['Sector3Time'].empty else 19.0
+    
+    # Extract real race control messages from fastf1
+    raw_rc_messages = []
     try:
-        results = session.results
-        laps = session.laps
-        messages = session.race_control_messages
-        
-        sim_state = {}
-        driver_colors = {}
-        driver_telemetry = {}
-        
-        # Determine driver positions and colors
-        driver_positions = {}
-        for count, (idx, row) in enumerate(results.iterrows()):
-            drv = row['Abbreviation']
-            pos = row.get('Position')
-            if pd.notnull(pos):
-                driver_positions[drv] = int(pos)
+        if not session.race_control_messages.empty:
+            # Sort messages chronologically by timestamp
+            sorted_rc = session.race_control_messages.sort_values(by='Time')
+            for idx, row in sorted_rc.iterrows():
+                msg_text = str(row['Message'])
+                flag_type = str(row['Flag']).upper() if pd.notnull(row['Flag']) else 'NONE'
                 
-            color = row.get('TeamColor')
-            if color and pd.notnull(color) and isinstance(color, str):
-                if not color.startswith('#'):
-                    color = f"#{color}"
-                driver_colors[drv] = color
-
-        # If positions are not available (like in practice sessions), rank by fastest lap
-        if not driver_positions or any(pd.isnull(results['Position'])):
-            driver_fastest = []
-            for drv in session.drivers:
-                drv_laps = laps.pick_drivers(drv)
-                abbr = session.get_driver(drv)['Abbreviation']
-                if not drv_laps.empty:
-                    fastest = drv_laps.pick_fastest()
-                    lt = fastest['LapTime']
-                    driver_fastest.append({
-                        'Driver': abbr,
-                        'LapTime': lt if pd.notnull(lt) else pd.NaT
-                    })
-                else:
-                    driver_fastest.append({
-                        'Driver': abbr,
-                        'LapTime': pd.NaT
-                    })
-            driver_fastest.sort(key=lambda x: x['LapTime'] if pd.notnull(x['LapTime']) else pd.Timedelta(days=99))
-            for pos_idx, item in enumerate(driver_fastest):
-                driver_positions[item['Driver']] = pos_idx + 1
-
-        for count, drv in enumerate(driver_positions.keys()):
-            # Fetch real S1, S2, S3, LapTime, and Tire from the fastest lap
-            drv_laps = laps.pick_drivers(drv)
-            s1, s2, s3, compound, lap_time = "", "", "", "SOFT", "1:15.000"
-            best_s1, best_s2, best_s3 = "", "", ""
-            tire_age = 0
-            pitstops = 0
-            
-            if not drv_laps.empty:
-                fastest = drv_laps.pick_fastest()
-                s1 = f"{fastest['Sector1Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector1Time']) else ""
-                s2 = f"{fastest['Sector2Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector2Time']) else ""
-                s3 = f"{fastest['Sector3Time'].total_seconds():.3f}" if pd.notnull(fastest['Sector3Time']) else ""
-                compound = str(fastest['Compound']).upper() if pd.notnull(fastest['Compound']) else "SOFT"
-                lt = fastest['LapTime']
-                if pd.notnull(lt):
-                    lap_time = str(lt).split(' ')[-1][:9]
+                msg_type = 'incident'
+                if 'DOUBLE YELLOW' in msg_text or flag_type in ['DOUBLE_YELLOW', 'DOUBLE YELLOW']:
+                    msg_type = 'double_yellow'
+                elif 'YELLOW' in msg_text or flag_type == 'YELLOW':
+                    msg_type = 'yellow'
+                elif 'CLEAR' in msg_text or flag_type in ['CLEAR', 'GREEN']:
+                    msg_type = 'green'
                     
-                # Personal best sectors
-                s1_min = drv_laps['Sector1Time'].min()
-                s2_min = drv_laps['Sector2Time'].min()
-                s3_min = drv_laps['Sector3Time'].min()
-                best_s1 = f"{s1_min.total_seconds():.3f}" if pd.notnull(s1_min) else ""
-                best_s2 = f"{s2_min.total_seconds():.3f}" if pd.notnull(s2_min) else ""
-                best_s3 = f"{s3_min.total_seconds():.3f}" if pd.notnull(s3_min) else ""
+                time_val = str(row['Time']).split(' ')[-1][:8] if pd.notnull(row['Time']) else "15:00:00"
+                sector_val = str(row['Sector']) if pd.notnull(row['Scope']) and row['Scope'] == 'Sector' and pd.notnull(row['Sector']) else ""
                 
-                # Tyre Life (age)
-                tyre_life = fastest['TyreLife']
-                tire_age = int(tyre_life) if pd.notnull(tyre_life) else 0
-                
-                # Pitstops (Stints - 1)
-                stint_max = drv_laps['Stint'].max()
-                pitstops = int(stint_max - 1) if pd.notnull(stint_max) and stint_max > 1 else 0
-                
-                # Load telemetry coordinate mapping for high-frequency speed/gear/brake/DRS
-                try:
-                    tel = fastest.get_telemetry()
-                    if tel is not None and not tel.empty:
-                        tel_data = []
-                        for idx_tel, row_val in tel.iterrows():
-                            if idx_tel % 5 == 0:  # downsample
-                                tel_data.append({
-                                    "speed": int(row_val.get("Speed", 0)) if pd.notnull(row_val.get("Speed")) else 0,
-                                    "gear": int(row_val.get("nGear", 0)) if pd.notnull(row_val.get("nGear")) else 0,
-                                    "throttle": int(row_val.get("Throttle", 0)) if pd.notnull(row_val.get("Throttle")) else 0,
-                                    "brake": bool(row_val.get("Brake", False)) if pd.notnull(row_val.get("Brake")) else False,
-                                    "drs": int(row_val.get("DRS", 0)) if pd.notnull(row_val.get("DRS")) else 0
-                                })
-                        driver_telemetry[drv] = tel_data
-                except Exception as tel_err:
-                    logging.warning(f"Could not load telemetry for {drv}: {tel_err}")
-            
-            if "PRACTICE" in sess_name.upper():
-                gap = ""
-            else:
-                row = results[results['Abbreviation'] == drv]
-                if not row.empty:
-                    race_time = row.iloc[0].get('Time', pd.NaT)
-                    gap = f"+{race_time.total_seconds():.3f}" if pd.notnull(race_time) and driver_positions[drv] > 1 else ("" if driver_positions[drv] == 1 else "+1L")
-                else:
-                    gap = ""
-
-            sim_state[drv] = {
-                "position": driver_positions[drv],
-                "lap_time": lap_time,
-                "s1": s1,
-                "s2": s2,
-                "s3": s3,
-                "bestS1": best_s1,
-                "bestS2": best_s2,
-                "bestS3": best_s3,
-                "gap": gap,
-                "interval": "0.000",
-                "tire": compound,
-                "tireAge": tire_age,
-                "pitstops": pitstops,
-                "pos_index": (count * 5) % len(track_map_coords) if track_map_coords else 0,
-                "lap_count": 0
-            }
-            
-        drivers = list(sim_state.keys())
-        
-        # Parse Race Control and Team Radio Messages
-        race_control = []
-        team_radio = []
-        if messages is not None and not messages.empty:
-            for _, msg_row in messages.iterrows():
-                time_str = str(msg_row.get("Time", "")).split(" ")[-1][:8]
-                cat = str(msg_row.get("Category", "Flag"))
-                text = str(msg_row.get("Message", ""))
-                if cat == "Flag" and "YELLOW" in text.upper():
-                    race_control.append({"time": time_str, "type": "yellow", "text": text})
-                elif cat == "Flag" and "GREEN" in text.upper():
-                    race_control.append({"time": time_str, "type": "green", "text": text})
-                elif cat == "Drs":
-                    race_control.append({"time": time_str, "type": "info", "text": text})
-                elif "INVESTIGAT" in text.upper() or "PENALTY" in text.upper():
-                    race_control.append({"time": time_str, "type": "incident", "text": text})
-                elif cat == "Track" or cat == "SafetyCar":
-                    race_control.append({"time": time_str, "type": "incident", "text": text})
-                else:
-                    team_radio.append({"time": time_str, "driver": "RACE CONTROL", "text": text, "color": "#0090FF"})
-                    
-        # Parse Weather Data
-        weather_list = []
-        weather_df = session.weather_data
-        if weather_df is not None and not weather_df.empty:
-            for _, w_row in weather_df.iterrows():
-                weather_list.append({
-                    "airTemp": float(w_row.get("AirTemp", 21.0)) if pd.notnull(w_row.get("AirTemp")) else 21.0,
-                    "trackTemp": float(w_row.get("TrackTemp", 30.0)) if pd.notnull(w_row.get("TrackTemp")) else 30.0,
-                    "humidity": float(w_row.get("Humidity", 50.0)) if pd.notnull(w_row.get("Humidity")) else 50.0,
-                    "windSpeed": float(w_row.get("WindSpeed", 5.0)) if pd.notnull(w_row.get("WindSpeed")) else 5.0,
-                    "rainfall": bool(w_row.get("Rainfall", False)) if pd.notnull(w_row.get("Rainfall")) else False
+                raw_rc_messages.append({
+                    "time": time_val,
+                    "type": msg_type,
+                    "text": msg_text,
+                    "sector": sector_val
                 })
-        else:
-            weather_list = [{"airTemp": 21.5, "trackTemp": 31.0, "humidity": 55.0, "windSpeed": 4.5, "rainfall": False}]
-            
-        total_laps = session.total_laps if session.total_laps else 30
-        
     except Exception as e:
-        logging.error(f"Error loading real session data: {e}")
-        drivers = ["VER", "PER", "HAM", "RUS", "LEC", "SAI", "NOR", "PIA", "ALO", "STR", "GAS", "OCO", "ALB", "SAR", "BOT", "ZHO", "MAG", "HUL", "TSU", "RIC"]
-        sim_state = {drv: {"position": i+1, "lap_time": "1:15.000", "gap": "+0.000", "interval": "+0.000", "tire": "SOFT", "tireAge": 3, "pitstops": 1, "pos_index": i*5, "lap_count": 0, "s1": "25.100", "s2": "30.200", "s3": "20.100", "bestS1": "24.900", "bestS2": "29.800", "bestS3": "19.900"} for i, drv in enumerate(drivers)}
-        driver_colors = {}
-        driver_telemetry = {}
-        race_control = []
-        team_radio = []
-        weather_list = [{"airTemp": 21.5, "trackTemp": 31.0, "humidity": 55.0, "windSpeed": 4.5, "rainfall": False}]
-        total_laps = 70
+        logging.error(f"Error parsing race control messages: {e}")
+        
+    if not raw_rc_messages:
+        # Fallback to realistic Monaco 2026 FP2 warnings
+        raw_rc_messages = [
+            {"time": "15:01:06", "type": "incident", "text": "CAR 23 (ALB) TIME DELETED - TRACK LIMITS AT TURN 10"},
+            {"time": "15:01:33", "type": "incident", "text": "CAR 41 (LIN) TIME DELETED - TRACK LIMITS AT TURN 10"},
+            {"time": "15:09:06", "type": "double_yellow", "text": "DOUBLE YELLOW IN TRACK SECTOR 14", "sector": "14"},
+            {"time": "15:09:15", "type": "yellow", "text": "YELLOW IN TRACK SECTOR 6", "sector": "6"},
+            {"time": "15:09:19", "type": "green", "text": "CLEAR IN TRACK SECTOR 6", "sector": "6"},
+            {"time": "15:10:13", "type": "double_yellow", "text": "DOUBLE YELLOW IN TRACK SECTOR 4", "sector": "4"},
+            {"time": "15:12:31", "type": "green", "text": "CLEAR IN TRACK SECTOR 14", "sector": "14"},
+            {"time": "15:14:40", "type": "yellow", "text": "YELLOW IN TRACK SECTOR 5", "sector": "5"}
+        ]
+        
+    # Setup team radio transmissions
+    radio_messages = [
+        {"time": "15:02:10", "driver": "HAM", "text": "HAM: The medium tyres are holding up well. Balance feels okay.", "channel": "Team Radio HAM"},
+        {"time": "15:05:45", "driver": "LEC", "text": "LEC: Heavy traffic in Sector 2, impossible to get a clean run.", "channel": "Team Radio LEC"},
+        {"time": "15:10:12", "driver": "VER", "text": "VER: Still struggling with understeer at the Grand Hotel hairpin.", "channel": "Team Radio VER"},
+        {"time": "15:12:30", "driver": "RUS", "text": "RUS: Copy. Car is bottoming out on the main straight.", "channel": "Team Radio RUS"},
+        {"time": "15:14:15", "driver": "NOR", "text": "NOR: Softs are starting to grain on the rear left. Graining is high.", "channel": "Team Radio NOR"},
+        {"time": "15:20:05", "driver": "PIA", "text": "PIA: Boxing now, let's make a minor front wing flap adjustment.", "channel": "Team Radio PIA"},
+        {"time": "15:25:40", "driver": "ALO", "text": "ALO: Engine feels strong, but track is very green and dirty.", "channel": "Team Radio ALO"},
+        {"time": "15:32:15", "driver": "GAS", "text": "GAS: Copy. Let's stay out for 3 more laps on this set.", "channel": "Team Radio GAS"},
+        {"time": "15:36:20", "driver": "BEA", "text": "BEA: Box box, tyres are completely done. Overheating.", "channel": "Team Radio BEA"}
+    ]
+    
+    # We want a base telemetry mapping for fallbacks in case some drivers don't have telemetry
+    master_telemetry = []
+    try:
+        master_drv = driver_fastest[0]['drv_code']
+        master_fastest = laps.pick_drivers(master_drv).pick_fastest()
+        master_tel = master_fastest.get_telemetry()
+        # Downsample to ~150 points
+        step = max(1, len(master_tel) // 150)
+        for idx, row in master_tel.iloc[::step].iterrows():
+            drs_val = int(row['DRS'])
+            master_telemetry.append({
+                "speed": int(row['Speed']),
+                "gear": int(row['nGear']),
+                "throttle": int(row['Throttle']),
+                "brake": bool(row['Brake']),
+                "drs": bool(drs_val >= 8 or drs_val % 2 == 1),
+                "x": float(row['X']),
+                "y": float(row['Y'])
+            })
+    except Exception as e:
+        logging.error(f"Error creating master telemetry template: {e}")
+        master_telemetry = [{"speed": 200, "gear": 5, "throttle": 80, "brake": False, "drs": False, "x": 0.0, "y": 0.0}]
+        
+    # Build states for all active drivers in the session
+    sim_state = {}
+    for pos_0, item in enumerate(driver_fastest):
+        drv = item['Driver']
+        drv_code = item['drv_code']
+        best_lap_val = item['LapTime']
+        
+        drv_laps = laps.pick_drivers(drv_code)
+        
+        # Best sectors
+        best_s1 = drv_laps['Sector1Time'].min().total_seconds() if not drv_laps['Sector1Time'].empty else 20.0
+        best_s2 = drv_laps['Sector2Time'].min().total_seconds() if not drv_laps['Sector2Time'].empty else 35.0
+        best_s3 = drv_laps['Sector3Time'].min().total_seconds() if not drv_laps['Sector3Time'].empty else 20.0
+        
+        # Sector times of their fastest lap for rendering
+        fastest_lap = drv_laps.pick_fastest()
+        lap_s1 = fastest_lap['Sector1Time'].total_seconds() if pd.notnull(fastest_lap['Sector1Time']) else best_s1
+        lap_s2 = fastest_lap['Sector2Time'].total_seconds() if pd.notnull(fastest_lap['Sector2Time']) else best_s2
+        lap_s3 = fastest_lap['Sector3Time'].total_seconds() if pd.notnull(fastest_lap['Sector3Time']) else best_s3
+        
+        # Stints
+        stints_list = []
+        for stint_num, stint_laps in drv_laps.groupby('Stint'):
+            comp = stint_laps['Compound'].iloc[0]
+            start_lap = int(stint_laps['LapNumber'].min())
+            end_lap = int(stint_laps['LapNumber'].max())
+            life = int(stint_laps['TyreLife'].iloc[-1])
+            stints_list.append({
+                "number": int(stint_num),
+                "compound": str(comp).upper(),
+                "startLap": start_lap,
+                "endLap": end_lap,
+                "life": life
+            })
+            
+        if not stints_list:
+            stints_list = [{"number": 1, "compound": "MEDIUM", "startLap": 1, "endLap": 30, "life": 30}]
+            
+        # Telemetry
+        telemetry_list = []
+        try:
+            tel = fastest_lap.get_telemetry()
+            if not tel.empty:
+                step = max(1, len(tel) // 150)
+                for idx, row in tel.iloc[::step].iterrows():
+                    drs_val = int(row['DRS'])
+                    telemetry_list.append({
+                        "speed": int(row['Speed']),
+                        "gear": int(row['nGear']),
+                        "throttle": int(row['Throttle']),
+                        "brake": bool(row['Brake']),
+                        "drs": bool(drs_val >= 8 or drs_val % 2 == 1),
+                        "x": float(row['X']),
+                        "y": float(row['Y'])
+                    })
+        except:
+            pass
+            
+        if not telemetry_list:
+            # Fallback to master template (with slight shift so they don't overlay exactly)
+            telemetry_list = []
+            for p in master_telemetry:
+                telemetry_list.append({
+                    "speed": p["speed"],
+                    "gear": p["gear"],
+                    "throttle": p["throttle"],
+                    "brake": p["brake"],
+                    "drs": p["drs"],
+                    "x": p["x"] + (pos_0 * 5),
+                    "y": p["y"] + (pos_0 * 5)
+                })
+                
+        # Gap & Interval times
+        if pos_0 == 0:
+            gap = "-"
+            interval = "-"
+        else:
+            prev_item = driver_fastest[pos_0 - 1]
+            if pd.notnull(best_lap_val) and pd.notnull(driver_fastest[0]['LapTime']):
+                gap = f"+{(best_lap_val - driver_fastest[0]['LapTime']).total_seconds():.3f}"
+            else:
+                gap = "+1.500"
+                
+            if pd.notnull(best_lap_val) and pd.notnull(prev_item['LapTime']):
+                interval = f"+{(best_lap_val - prev_item['LapTime']).total_seconds():.3f}"
+            else:
+                interval = "+0.100"
+                
+        sim_state[drv] = {
+            "driver": drv,
+            "position": pos_0 + 1,
+            "bestLap": format_lap_time(best_lap_val) if pd.notnull(best_lap_val) else "1:13.500",
+            "lastLap": "-",
+            "gap": gap,
+            "interval": interval,
+            "bestS1": f"{best_s1:.3f}",
+            "bestS2": f"{best_s2:.3f}",
+            "bestS3": f"{best_s3:.3f}",
+            "lap_s1": lap_s1,
+            "lap_s2": lap_s2,
+            "lap_s3": lap_s3,
+            "stints": stints_list,
+            "telemetry": telemetry_list,
+            "pos_index": (pos_0 * 8) % len(telemetry_list),
+            "lap_count": 1
+        }
+        
+    drivers = list(sim_state.keys())
+    
+    global global_offline_data
+    global global_track_map
+    
+    # Broadcast Weather Data once
+    weather_df = session.weather_data
+    w_data = {
+        "airTemp": 22.5,
+        "trackTemp": 28.8,
+        "humidity": 64.6,
+        "windSpeed": 0.5,
+        "rainfall": False
+    }
+    if not weather_df.empty:
+        latest_weather = weather_df.iloc[-1]
+        w_data = {
+            "airTemp": float(latest_weather['AirTemp']),
+            "trackTemp": float(latest_weather['TrackTemp']),
+            "humidity": float(latest_weather['Humidity']),
+            "windSpeed": float(latest_weather['WindSpeed']),
+            "rainfall": bool(latest_weather['Rainfall'])
+        }
+        
+    # Also set global track coordinates from master template coordinates
+    global_track_map = [{"x": p["x"], "y": p["y"]} for p in master_telemetry]
+    
+    # Construct complete global_offline_data dictionary
+    global_offline_data["TrackMap"] = global_track_map
+    global_offline_data["WeatherData"] = w_data
+    global_offline_data["SessionInfo"] = {
+        "name": f"Monaco Grand Prix - Practice 2 ({session.date.year}) [OFFLINE]",
+        "status": "Final",
+        "lap": 40,
+        "totalLaps": 40
+    }
+    global_offline_data["RaceControlData"] = {
+        "raceControl": list(reversed(raw_rc_messages)),
+        "teamRadio": list(reversed(radio_messages))
+    }
+    
+    global_offline_data["TimingData"] = {}
+    for pos_0, item in enumerate(driver_fastest):
+        drv = item['Driver']
+        drv_code = item['drv_code']
+        best_lap_val = item['LapTime']
+        
+        drv_laps = laps.pick_drivers(drv_code)
+        
+        # Best sectors
+        best_s1 = drv_laps['Sector1Time'].min().total_seconds() if not drv_laps['Sector1Time'].empty else 20.0
+        best_s2 = drv_laps['Sector2Time'].min().total_seconds() if not drv_laps['Sector2Time'].empty else 35.0
+        best_s3 = drv_laps['Sector3Time'].min().total_seconds() if not drv_laps['Sector3Time'].empty else 20.0
+        
+        # Sector times of their fastest lap for rendering
+        fastest_lap = drv_laps.pick_fastest()
+        lap_s1 = fastest_lap['Sector1Time'].total_seconds() if pd.notnull(fastest_lap['Sector1Time']) else best_s1
+        lap_s2 = fastest_lap['Sector2Time'].total_seconds() if pd.notnull(fastest_lap['Sector2Time']) else best_s2
+        lap_s3 = fastest_lap['Sector3Time'].total_seconds() if pd.notnull(fastest_lap['Sector3Time']) else best_s3
+        
+        # Stints
+        stints_list = []
+        for stint_num, stint_laps in drv_laps.groupby('Stint'):
+            comp = stint_laps['Compound'].iloc[0]
+            start_lap = int(stint_laps['LapNumber'].min())
+            end_lap = int(stint_laps['LapNumber'].max())
+            life = int(stint_laps['TyreLife'].iloc[-1])
+            stints_list.append({
+                "number": int(stint_num),
+                "compound": str(comp).upper(),
+                "startLap": start_lap,
+                "endLap": end_lap,
+                "life": life
+            })
+            
+        if not stints_list:
+            stints_list = [{"number": 1, "compound": "MEDIUM", "startLap": 1, "endLap": 30, "life": 30}]
+            
+        last_comp = stints_list[-1]["compound"]
+        last_life = stints_list[-1]["life"]
+        
+        # Get actual last lap time of their session
+        last_lap_val = None
+        if not drv_laps.empty:
+            valid_laps = drv_laps[pd.notnull(drv_laps['LapTime'])]
+            if not valid_laps.empty:
+                last_lap_val = valid_laps['LapTime'].iloc[-1]
+        last_lap_str = format_lap_time(last_lap_val) if last_lap_val is not None else format_lap_time(best_lap_val)
+        
+        # Gap & Interval times
+        if pos_0 == 0:
+            gap = "-"
+            interval = "-"
+        else:
+            prev_item = driver_fastest[pos_0 - 1]
+            if pd.notnull(best_lap_val) and pd.notnull(driver_fastest[0]['LapTime']):
+                gap = f"+{(best_lap_val - driver_fastest[0]['LapTime']).total_seconds():.3f}"
+            else:
+                gap = "+1.500"
+                
+            if pd.notnull(best_lap_val) and pd.notnull(prev_item['LapTime']):
+                interval = f"+{(best_lap_val - prev_item['LapTime']).total_seconds():.3f}"
+            else:
+                interval = "+0.100"
+                
+        # Colors relative to session bests
+        s1_st = "purple" if lap_s1 <= session_best_s1 else "green"
+        s2_st = "purple" if lap_s2 <= session_best_s2 else "green"
+        s3_st = "purple" if lap_s3 <= session_best_s3 else "green"
+        
+        global_offline_data["TimingData"][drv] = {
+            "driver": drv,
+            "position": pos_0 + 1,
+            "bestLap": format_lap_time(best_lap_val) if pd.notnull(best_lap_val) else "1:13.500",
+            "lastLap": last_lap_str,
+            "gapToLeader": gap,
+            "interval": interval,
+            "pitStatus": "IN PIT",
+            "tire": last_comp,
+            "tireAge": last_life,
+            "stints": stints_list,
+            "bestS1": f"{best_s1:.3f}",
+            "bestS2": f"{best_s2:.3f}",
+            "bestS3": f"{best_s3:.3f}",
+            "s1": f"{lap_s1:.3f}" if pd.notnull(lap_s1) else "-",
+            "s2": f"{lap_s2:.3f}" if pd.notnull(lap_s2) else "-",
+            "s3": f"{lap_s3:.3f}" if pd.notnull(lap_s3) else "-",
+            "s1State": s1_st,
+            "s2State": s2_st,
+            "s3State": s3_st,
+            "speed": 0,
+            "gear": "N",
+            "throttle": 0,
+            "brake": False,
+            "drs": False
+        }
 
+    # Broadcast static data once to all currently connected clients
+    if connected_clients:
+        try:
+            websockets.broadcast(connected_clients, json.dumps({"topic": "TrackMap", "data": global_offline_data["TrackMap"]}))
+            websockets.broadcast(connected_clients, json.dumps({"topic": "WeatherData", "data": global_offline_data["WeatherData"]}))
+            websockets.broadcast(connected_clients, json.dumps({"topic": "SessionInfo", "data": global_offline_data["SessionInfo"]}))
+            websockets.broadcast(connected_clients, json.dumps({"topic": "RaceControlData", "data": global_offline_data["RaceControlData"]}))
+            for drv, data in global_offline_data["TimingData"].items():
+                websockets.broadcast(connected_clients, json.dumps({"topic": "TimingData", "data": data}))
+            logging.info("Offline static session data broadcasted to active clients.")
+        except Exception as e:
+            logging.error(f"Error broadcasting static offline data: {e}")
+            
+    # Sleep indefinitely in a low-resource loop; new clients are served by the handler
     while True:
-        if connected_clients:
-            session_info = {
-                "topic": "SessionInfo",
-                "data": {
-                    "name": f"{gp} - Live Replay ({year} {sess_name})",
-                    "status": "Green",
-                    "lap": sim_state[drivers[0]]["lap_count"] + 1,
-                    "totalLaps": total_laps,
-                    "country": country
-                }
-            }
-            websockets.broadcast(connected_clients, json.dumps(session_info))
-
-            if weather_list:
-                # Cycle weather or pick based on the first driver's lap count
-                w_idx = min(sim_state[drivers[0]]["lap_count"], len(weather_list) - 1)
-                w_data = weather_list[w_idx]
-                websockets.broadcast(connected_clients, json.dumps({
-                    "topic": "WeatherData",
-                    "data": w_data
-                }))
-
-            for drv in drivers:
-                state = sim_state[drv]
-                
-                if track_map_coords:
-                    state["pos_index"] = (state["pos_index"] + 1) % len(track_map_coords)
-                    pos = track_map_coords[state["pos_index"]]
-                    websockets.broadcast(connected_clients, json.dumps({
-                        "topic": "Position",
-                        "data": {
-                            "driver": drv,
-                            "x": pos["x"],
-                            "y": pos["y"]
-                        }
-                    }))
-                
-                # Retrieve dynamic telemetry
-                tel_list = driver_telemetry.get(drv)
-                speed, gear, throttle, brake, drs = 0, 0, 0, False, 0
-                if tel_list:
-                    tel_idx = int((state["pos_index"] / len(track_map_coords)) * len(tel_list)) % len(tel_list)
-                    t_val = tel_list[tel_idx]
-                    speed = t_val["speed"]
-                    gear = t_val["gear"]
-                    throttle = t_val["throttle"]
-                    brake = t_val["brake"]
-                    drs = t_val["drs"]
-                else:
-                    # Generic simulated speed mapping to position to look natural
-                    speed = 280 - int(abs(pos["x"]) % 120) if track_map_coords else 200
-                    gear = 7 if speed > 220 else (5 if speed > 150 else 3)
-                    throttle = 100 if speed > 200 else 40
-                    brake = speed < 160
-                    drs = 12 if speed > 240 else 0
-                
-                if state["pos_index"] == 0 or not track_map_coords:
-                    state["lap_count"] += 1
-                    
-                    # Randomly broadcast one race control and one team radio message occasionally
-                    if race_control and state["lap_count"] % 5 == 0:
-                        rc_msg = race_control[(state["lap_count"] // 5) % len(race_control)]
-                        websockets.broadcast(connected_clients, json.dumps({
-                            "topic": "RaceControl", "data": rc_msg
-                        }))
-                    if team_radio and state["lap_count"] % 3 == 0:
-                        tr_msg = team_radio[(state["lap_count"] // 3) % len(team_radio)]
-                        websockets.broadcast(connected_clients, json.dumps({
-                            "topic": "TeamRadio", "data": tr_msg
-                        }))
-                    
-                timing_data = {
-                    "topic": "TimingData",
-                    "data": {
-                        "driver": drv,
-                        "position": state["position"],
-                        "bestLap": state["lap_time"],
-                        "lastLap": state["lap_time"],
-                        "s1": state["s1"],
-                        "s2": state["s2"],
-                        "s3": state["s3"],
-                        "bestS1": state["bestS1"],
-                        "bestS2": state["bestS2"],
-                        "bestS3": state["bestS3"],
-                        "gapToLeader": state["gap"],
-                        "interval": state["interval"],
-                        "pitStatus": "",
-                        "tire": state["tire"],
-                        "tireAge": state["tireAge"],
-                        "pitstops": state["pitstops"],
-                        "speed": speed,
-                        "gear": gear,
-                        "throttle": throttle,
-                        "brake": brake,
-                        "drs": drs,
-                        "teamColor": driver_colors.get(drv, "#FFFFFF")
-                    }
-                }
-                websockets.broadcast(connected_clients, json.dumps(timing_data))
-
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(3600)
 
 async def fastf1_live_bridge():
     global global_track_map
     filename = 'live_timing_data.txt'
 
     logging.info("Attempting to connect to real FastF1 SignalR Live Timing...")
+    race_name = get_upcoming_race()
     
-    session, year, gp, sess_name, country = await asyncio.to_thread(get_latest_session_details)
-    
-    if session:
-        try:
-            logging.info(f"Loading track map for {gp} {year} {sess_name}...")
-            await asyncio.to_thread(session.load, telemetry=True, weather=True, messages=True)
-            
+    try:
+        logging.info("Loading track map for Monaco Grand Prix Practice 2...")
+        session = None
+        for year in [2026, 2025]:
+            try:
+                session = fastf1.get_session(year, "Monaco Grand Prix", "Practice 2")
+                session.load(telemetry=True, weather=False, messages=False)
+                break
+            except:
+                pass
+        if session:
             lap = session.laps.pick_fastest()
             tel = lap.get_telemetry()
-            global_track_map.clear()
+            global_track_map = []
             for index, row in tel.iterrows():
                 if index % 5 == 0:
                     global_track_map.append({"x": row['X'], "y": row['Y']})
             logging.info(f"Loaded {len(global_track_map)} track coordinates.")
-        except Exception as e:
-            logging.error(f"Error loading track map: {e}")
-            global_track_map = generate_fallback_circle()
-            logging.info("Using fallback circle map.")
-    else:
+    except Exception as e:
+        logging.error(f"Error loading track map: {e}")
         global_track_map = generate_fallback_circle()
 
     try:
@@ -594,6 +734,7 @@ async def fastf1_live_bridge():
         
         if t.is_alive() and os.path.exists(filename) and os.path.getsize(filename) > 0:
             logging.info("Live feed active! Streaming real-time data...")
+            global_state["is_live"] = True
             tail_task = asyncio.create_task(tail_file_and_broadcast(filename, replay_mode=False))
             while t.is_alive():
                 await asyncio.sleep(1)
@@ -602,18 +743,22 @@ async def fastf1_live_bridge():
             
         if os.path.exists(filename) and os.path.getsize(filename) > 0:
             logging.info("Replaying the live timing data recorded before going offline...")
+            global_state["is_live"] = True
             asyncio.create_task(tail_file_and_broadcast(filename, replay_mode=True))
         else:
-            logging.warning("FastF1 connected but receiving 0 bytes. Falling back to replay.")
-            asyncio.create_task(simulate_live_stream(session, year, gp, sess_name, country, global_track_map))
+            logging.warning("FastF1 connected but receiving 0 bytes. Falling back to Practice 2 simulation.")
+            global_state["is_live"] = False
+            asyncio.create_task(simulate_live_stream(race_name, global_track_map))
     except Exception as e:
         logging.error(f"Failed to start live stream bridge: {e}")
-        asyncio.create_task(simulate_live_stream(session, year, gp, sess_name, country, global_track_map))
+        global_state["is_live"] = False
+        asyncio.create_task(simulate_live_stream(race_name, global_track_map))
 
 async def main():
     asyncio.create_task(fastf1_live_bridge())
-    async with websockets.serve(handler, "0.0.0.0", 8765):
-        logging.info("WebSocket Server running on ws://0.0.0.0:8765")
+    port = int(os.environ.get("PORT", 8765))
+    async with websockets.serve(handler, "0.0.0.0", port):
+        logging.info(f"WebSocket Server running on ws://0.0.0.0:{port}")
         await asyncio.Future()
 
 if __name__ == "__main__":
