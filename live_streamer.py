@@ -625,7 +625,7 @@ async def simulate_live_stream(race_name, track_map_coords):
     global_offline_data["TrackMap"] = global_track_map
     global_offline_data["WeatherData"] = w_data
     global_offline_data["SessionInfo"] = {
-        "name": f"Monaco Grand Prix - Practice 2 ({session.date.year}) [OFFLINE]",
+        "name": f"Monaco Grand Prix - Qualifying ({session.date.year}) [OFFLINE]",
         "status": "Final",
         "lap": 40,
         "totalLaps": 40
