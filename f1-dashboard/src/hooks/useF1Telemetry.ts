@@ -25,46 +25,92 @@ export function useF1Telemetry() {
   useEffect(() => {
     // Connect to the python fastf1 backend
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8765';
-    const ws = new WebSocket(wsUrl);
-    
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        
-        if (message.topic === 'TrackMap') {
-            setTrackCoords(message.data);
-        }
-        else if (message.topic === 'TimingData') {
-          timingBufferRef.current[message.data.driver] = message.data;
-        }
-        else if (message.topic === 'Position') {
-          positionsBufferRef.current[message.data.driver] = message.data;
-        }
-        else if (message.topic === 'SessionInfo') {
-          setSessionInfo(message.data);
-        }
-        else if (message.topic === 'WeatherData') {
-          setWeatherData(message.data);
-        }
-        else if (message.topic === 'RaceControlData') {
-          setRaceControlMessages(message.data.raceControl || []);
-          setTeamRadioMessages(message.data.teamRadio || []);
-        }
-        else if (message.topic === 'Telemetry') {
-          const driver = message.data.driver;
-          if (!telemetryBufferRef.current[driver]) {
-            telemetryBufferRef.current[driver] = [];
+    let ws: WebSocket | null = null;
+    let fallbackTimeout: any;
+
+    const setupWebSocket = (url: string, isFallback: boolean) => {
+      console.log(`Connecting to WS: ${url}`);
+      const socket = new WebSocket(url);
+      let failed = false;
+
+      // If we are connecting to a production URL, try localhost first and fallback after 1.5 seconds
+      if (!isFallback && url !== 'ws://localhost:8765' && wsUrl !== 'ws://localhost:8765') {
+        fallbackTimeout = setTimeout(() => {
+          if (socket.readyState !== WebSocket.OPEN) {
+            console.log("Local WS connection timed out, falling back to Render WS...");
+            failed = true;
+            socket.close();
+            setupWebSocket(wsUrl, true);
           }
-          telemetryBufferRef.current[driver].push(message.data);
-          
-          if (telemetryBufferRef.current[driver].length > 500) {
-            telemetryBufferRef.current[driver].shift();
-          }
-        }
-      } catch (err) {
-        console.error("WS Parse error", err);
+        }, 1500);
       }
+
+      socket.onopen = () => {
+        if (failed) return;
+        clearTimeout(fallbackTimeout);
+        ws = socket;
+        console.log(`WebSocket connected to ${url}`);
+      };
+
+      socket.onerror = (err) => {
+        if (failed) return;
+        console.error(`WebSocket error on ${url}:`, err);
+        // If local fails immediately, fall back instantly
+        if (!isFallback && url === 'ws://localhost:8765') {
+          clearTimeout(fallbackTimeout);
+          failed = true;
+          socket.close();
+          setupWebSocket(wsUrl, true);
+        }
+      };
+
+      socket.onmessage = (event) => {
+        if (failed) return;
+        try {
+          const message = JSON.parse(event.data);
+          
+          if (message.topic === 'TrackMap') {
+              setTrackCoords(message.data);
+          }
+          else if (message.topic === 'TimingData') {
+            timingBufferRef.current[message.data.driver] = message.data;
+          }
+          else if (message.topic === 'Position') {
+            positionsBufferRef.current[message.data.driver] = message.data;
+          }
+          else if (message.topic === 'SessionInfo') {
+            setSessionInfo(message.data);
+          }
+          else if (message.topic === 'WeatherData') {
+            setWeatherData(message.data);
+          }
+          else if (message.topic === 'RaceControlData') {
+            setRaceControlMessages(message.data.raceControl || []);
+            setTeamRadioMessages(message.data.teamRadio || []);
+          }
+          else if (message.topic === 'Telemetry') {
+            const driver = message.data.driver;
+            if (!telemetryBufferRef.current[driver]) {
+              telemetryBufferRef.current[driver] = [];
+            }
+            telemetryBufferRef.current[driver].push(message.data);
+            
+            if (telemetryBufferRef.current[driver].length > 500) {
+              telemetryBufferRef.current[driver].shift();
+            }
+          }
+        } catch (err) {
+          console.error("WS Parse error", err);
+        }
+      };
     };
+
+    // If in production, try local WebSocket first, else connect directly to wsUrl
+    if (wsUrl !== 'ws://localhost:8765') {
+      setupWebSocket('ws://localhost:8765', false);
+    } else {
+      setupWebSocket(wsUrl, false);
+    }
 
     const interval = setInterval(() => {
       setTelemetryState(current => {
@@ -119,7 +165,8 @@ export function useF1Telemetry() {
     animationFrameId = requestAnimationFrame(updateLoop);
 
     return () => {
-      ws.close();
+      if (ws) (ws as WebSocket).close();
+      clearTimeout(fallbackTimeout);
       clearInterval(interval);
       cancelAnimationFrame(animationFrameId);
     };
