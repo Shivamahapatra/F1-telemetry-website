@@ -19,6 +19,9 @@ export function useF1Telemetry() {
   const telemetryBufferRef = useRef<Record<string, any[]>>({});
   const [telemetryState, setTelemetryState] = useState<Record<string, any[]>>({});
 
+  const timingBufferRef = useRef<Record<string, any>>({});
+  const positionsBufferRef = useRef<Record<string, any>>({});
+
   useEffect(() => {
     // Connect to the python fastf1 backend
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8765';
@@ -32,19 +35,10 @@ export function useF1Telemetry() {
             setTrackCoords(message.data);
         }
         else if (message.topic === 'TimingData') {
-          setTimingData((prev) => {
-            const updated = [...prev];
-            const idx = updated.findIndex(d => d.driver === message.data.driver);
-            if (idx >= 0) updated[idx] = message.data;
-            else updated.push(message.data);
-            return updated.sort((a,b) => a.position - b.position);
-          });
+          timingBufferRef.current[message.data.driver] = message.data;
         }
         else if (message.topic === 'Position') {
-          setTrackPositions(prev => ({
-            ...prev,
-            [message.data.driver]: message.data
-          }));
+          positionsBufferRef.current[message.data.driver] = message.data;
         }
         else if (message.topic === 'SessionInfo') {
           setSessionInfo(message.data);
@@ -82,9 +76,52 @@ export function useF1Telemetry() {
       });
     }, 500);
 
+    // Controlled 30 FPS update loop
+    let animationFrameId: number;
+    let lastUpdate = 0;
+
+    const updateLoop = (timestamp: number) => {
+      if (timestamp - lastUpdate >= 33) { // 33ms is ~30fps
+        let nextPositions: Record<string, any> | null = null;
+        let nextTiming: Record<string, any> | null = null;
+
+        if (Object.keys(positionsBufferRef.current).length > 0) {
+          nextPositions = { ...positionsBufferRef.current };
+          positionsBufferRef.current = {};
+        }
+
+        if (Object.keys(timingBufferRef.current).length > 0) {
+          nextTiming = { ...timingBufferRef.current };
+          timingBufferRef.current = {};
+        }
+
+        if (nextPositions) {
+          setTrackPositions(prev => ({ ...prev, ...nextPositions }));
+        }
+
+        if (nextTiming) {
+          setTimingData(prev => {
+            const updated = [...prev];
+            Object.values(nextTiming!).forEach((newData: any) => {
+              const idx = updated.findIndex(d => d.driver === newData.driver);
+              if (idx >= 0) updated[idx] = newData;
+              else updated.push(newData);
+            });
+            return updated.sort((a, b) => a.position - b.position);
+          });
+        }
+
+        lastUpdate = timestamp;
+      }
+      animationFrameId = requestAnimationFrame(updateLoop);
+    };
+
+    animationFrameId = requestAnimationFrame(updateLoop);
+
     return () => {
       ws.close();
       clearInterval(interval);
+      cancelAnimationFrame(animationFrameId);
     };
   }, []);
 
