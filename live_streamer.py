@@ -52,6 +52,8 @@ def format_lap_time(val):
     return f"{minutes}:{seconds:06.3f}"
 
 logging.basicConfig(level=logging.INFO)
+logging.getLogger('websockets').setLevel(logging.DEBUG)
+
 connected_clients = set()
 global_track_map = []
 
@@ -768,8 +770,13 @@ async def health_check(path, request_headers):
     # If a WebSocket key is present, force standard headers to bypass proxy stripping
     if key:
         print("[HEALTH_CHECK] WebSocket handshake detected, normalizing Upgrade and Connection headers...", flush=True)
+        if "Connection" in request_headers:
+            del request_headers["Connection"]
+        if "Upgrade" in request_headers:
+            del request_headers["Upgrade"]
         request_headers["Connection"] = "Upgrade"
         request_headers["Upgrade"] = "websocket"
+
         
         # Log validation issues to stdout for debugging
         if not any(token.strip() == "upgrade" for token in connection.lower().split(",")):
@@ -791,7 +798,7 @@ async def health_check(path, request_headers):
 async def main():
     asyncio.create_task(fastf1_live_bridge())
     port = int(os.environ.get("PORT", 8765))
-    async with websockets.serve(handler, "0.0.0.0", port, process_request=health_check):
+    async with websockets.serve(handler, "0.0.0.0", port, process_request=health_check, debug=True):
         logging.info(f"WebSocket Server running on ws://0.0.0.0:{port}")
         await asyncio.Future()
 
