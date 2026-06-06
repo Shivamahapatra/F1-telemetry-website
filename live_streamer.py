@@ -796,11 +796,17 @@ async def health_check(path, request_headers):
 
 
 async def main():
-    asyncio.create_task(fastf1_live_bridge())
-    port = int(os.environ.get("PORT", 8765))
-    async with websockets.serve(handler, "0.0.0.0", port, process_request=health_check, debug=True):
-        logging.info(f"WebSocket Server running on ws://0.0.0.0:{port}")
-        await asyncio.Future()
+    try:
+        asyncio.create_task(fastf1_live_bridge())
+        port = int(os.environ.get("PORT", 8765))
+        async with websockets.serve(handler, "0.0.0.0", port, process_request=health_check, debug=True):
+            logging.info(f"WebSocket Server running on ws://0.0.0.0:{port}")
+            await asyncio.Future()
+    except Exception as e:
+        logging.critical(f"Critical error in main loop: {e}", exc_info=True)
+        await asyncio.sleep(5)
+        raise
+
 
 if __name__ == "__main__":
     asyncio.run(main())
