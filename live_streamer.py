@@ -190,6 +190,35 @@ async def handler(websocket):
                     asyncio.create_task(handle_get_laptimes(websocket, data))
                 elif data.get("action") == "get_telemetry":
                     asyncio.create_task(handle_get_telemetry(websocket, data))
+                elif data.get("action") == "publish":
+                    # Update global state to prevent offline simulation from overwriting
+                    global_state["is_live"] = True
+                    topic = data.get("topic")
+                    payload = data.get("data")
+                    
+                    # Store static data to serve to new connecting clients
+                    if topic == "TrackMap":
+                        global_track_map.clear()
+                        global_track_map.extend(payload)
+                    elif topic == "WeatherData":
+                        global_offline_data["WeatherData"] = payload
+                    elif topic == "SessionInfo":
+                        global_offline_data["SessionInfo"] = payload
+                    elif topic == "RaceControlData":
+                        global_offline_data["RaceControlData"] = payload
+                    elif topic == "TimingData":
+                        driver = payload.get("driver")
+                        if driver:
+                            global_offline_data["TimingData"][driver] = payload
+
+                    # Broadcast to all OTHER connected clients (the subscribers)
+                    out_msg = json.dumps({"topic": topic, "data": payload})
+                    for client in list(connected_clients):
+                        if client != websocket:
+                            try:
+                                await client.send(out_msg)
+                            except:
+                                pass
             except json.JSONDecodeError:
                 pass
     finally:
@@ -323,12 +352,12 @@ async def simulate_live_stream(race_name, track_map_coords):
     global global_track_map
     logging.info("Starting historical replay simulation stream using Practice 2 data...")
     
-    # Try loading 2026, then 2025 Monaco Practice 2
+    # Try loading 2026, then 2025 Monaco Qualifying
     session = None
     for year in [2026, 2025]:
         try:
-            logging.info(f"Fetching real {year} Monaco GP Practice 2 data for replay...")
-            session = fastf1.get_session(year, "Monaco Grand Prix", "Practice 2")
+            logging.info(f"Fetching real {year} Monaco GP Qualifying data for replay...")
+            session = fastf1.get_session(year, "Monaco Grand Prix", "Qualifying")
             # Load with messages=True to retrieve steward warnings, flags, and investigations
             session.load(telemetry=True, weather=True, messages=True)
             break
