@@ -799,7 +799,7 @@ async def main():
     try:
         asyncio.create_task(fastf1_live_bridge())
         port = int(os.environ.get("PORT", 8765))
-        async with websockets.serve(handler, "0.0.0.0", port, process_request=health_check, debug=True):
+        async with websockets.serve(handler, "0.0.0.0", port, process_request=health_check):
             logging.info(f"WebSocket Server running on ws://0.0.0.0:{port}")
             await asyncio.Future()
     except Exception as e:
