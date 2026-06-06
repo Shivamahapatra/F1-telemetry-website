@@ -319,6 +319,8 @@ def _run_fastf1_client_thread(filename):
         logging.error(f"F1 Client thread error: {e}")
 
 async def simulate_live_stream(race_name, track_map_coords):
+    global global_offline_data
+    global global_track_map
     logging.info("Starting historical replay simulation stream using Practice 2 data...")
     
     # Try loading 2026, then 2025 Monaco Practice 2
@@ -437,7 +439,24 @@ async def simulate_live_stream(race_name, track_map_coords):
             })
     except Exception as e:
         logging.error(f"Error creating master telemetry template: {e}")
-        master_telemetry = [{"speed": 200, "gear": 5, "throttle": 80, "brake": False, "drs": False, "x": 0.0, "y": 0.0}]
+
+    # Generate simulated master telemetry loop using track map if telemetry is missing
+    if len(master_telemetry) <= 1:
+        logging.info("Generating simulated telemetry loop from fallback track map...")
+        if not global_track_map or len(global_track_map) <= 1:
+            global_track_map = generate_fallback_circle()
+        
+        master_telemetry = []
+        for i, pt in enumerate(global_track_map):
+            master_telemetry.append({
+                "speed": 180 + int(math.sin(i / 10.0) * 80),
+                "gear": 4 + int(math.sin(i / 10.0) * 2),
+                "throttle": 80 if math.sin(i / 10.0) > 0 else 0,
+                "brake": math.sin(i / 10.0) <= 0,
+                "drs": i % 20 < 5,
+                "x": pt["x"],
+                "y": pt["y"]
+            })
         
     # Build states for all active drivers in the session
     sim_state = {}
@@ -548,9 +567,6 @@ async def simulate_live_stream(race_name, track_map_coords):
         
     drivers = list(sim_state.keys())
     
-    global global_offline_data
-    global global_track_map
-    
     # Broadcast Weather Data once
     weather_df = session.weather_data
     w_data = {
@@ -571,7 +587,10 @@ async def simulate_live_stream(race_name, track_map_coords):
         }
         
     # Also set global track coordinates from master template coordinates
-    global_track_map = [{"x": p["x"], "y": p["y"]} for p in master_telemetry]
+    if len(master_telemetry) > 1:
+        global_track_map = [{"x": p["x"], "y": p["y"]} for p in master_telemetry]
+    elif not global_track_map or len(global_track_map) <= 1:
+        global_track_map = generate_fallback_circle()
     
     # Construct complete global_offline_data dictionary
     global_offline_data["TrackMap"] = global_track_map
