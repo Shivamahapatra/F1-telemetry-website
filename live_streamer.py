@@ -815,6 +815,19 @@ async def health_check(path, request_headers):
 
 
 async def main():
+    # Load F1 Auth Token from environment variables if present (useful for cloud deployments)
+    f1_auth = os.environ.get("F1_AUTH_JSON")
+    if f1_auth:
+        try:
+            import fastf1.internals.f1auth as auth
+            os.makedirs(auth.USER_DATA_DIR, exist_ok=True)
+            auth_file = os.path.join(auth.USER_DATA_DIR, "f1auth.json")
+            with open(auth_file, "w") as f:
+                f.write(f1_auth)
+            logging.info(f"Loaded F1 Auth Token into {auth_file}")
+        except Exception as e:
+            logging.error(f"Failed to write F1 Auth Token from environment: {e}")
+
     try:
         asyncio.create_task(fastf1_live_bridge())
         port = int(os.environ.get("PORT", 8765))
