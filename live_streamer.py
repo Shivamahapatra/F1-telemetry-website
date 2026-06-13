@@ -821,26 +821,11 @@ async def health_check(connection, request):
     path = request.path
     request_headers = dict(request.headers)
     print(f"[HEALTH_CHECK] Incoming request: path={path}", flush=True)
-    print(f"[HEALTH_CHECK] Headers: {request_headers}", flush=True)
     
-    upgrade = request_headers.get("Upgrade", "")
-    connection_header = request_headers.get("Connection", "")
     key = request_headers.get("Sec-WebSocket-Key", "")
     
-    # If a WebSocket key is present, force standard headers to bypass proxy stripping
+    # If a WebSocket key is present, let the websockets library handle the handshake normally
     if key:
-        print("[HEALTH_CHECK] WebSocket handshake detected, bypassing header validation...", flush=True)
-        return None
-        
-    # Log validation issues to stdout for debugging
-    if not any(token.strip().lower() == "upgrade" for token in connection_header.split(",")):
-            print(f"[HEALTH_CHECK] WARNING: Original Connection header did not contain 'upgrade': '{connection}'", flush=True)
-        if upgrade.lower() != "websocket":
-            print(f"[HEALTH_CHECK] WARNING: Original Upgrade header was not 'websocket': '{upgrade}'", flush=True)
-        if version != "13":
-            print(f"[HEALTH_CHECK] WARNING: Sec-WebSocket-Version is not '13': '{version}'", flush=True)
-            
-        print("[HEALTH_CHECK] Handshake allowed to proceed", flush=True)
         return None
         
     print("[HEALTH_CHECK] Non-upgrade request, returning 200 OK", flush=True)
