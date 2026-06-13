@@ -352,21 +352,31 @@ async def simulate_live_stream(race_name, track_map_coords):
     global global_track_map
     logging.info("Starting historical replay simulation stream using Practice 2 data...")
     
-    # Try loading 2026, then 2025 Monaco Qualifying
+    # Try loading the latest available Qualifying session for the current race
     session = None
     for year in [2026, 2025]:
         try:
-            logging.info(f"Fetching real {year} Monaco GP Qualifying data for replay...")
-            session = fastf1.get_session(year, "Monaco Grand Prix", "Qualifying")
+            logging.info(f"Fetching real {year} {race_name} Qualifying data for replay...")
+            temp_session = fastf1.get_session(year, race_name, "Qualifying")
             # Load with messages=True to retrieve steward warnings, flags, and investigations
-            session.load(telemetry=True, weather=True, messages=True)
+            temp_session.load(telemetry=True, weather=True, messages=True)
+            # Verify data is actually loaded by accessing laps
+            _ = temp_session.laps
+            session = temp_session
             break
         except Exception as e:
-            logging.error(f"Error loading {year} Practice 2: {e}")
+            logging.error(f"Error loading {year} {race_name} Qualifying: {e}")
             
     if not session:
-        logging.error("Failed to load any Monaco GP Practice 2 data!")
-        return
+        logging.error(f"Failed to load any {race_name} Qualifying data! Falling back to Monaco.")
+        # Fallback to Monaco
+        try:
+            session = fastf1.get_session(2025, "Monaco Grand Prix", "Qualifying")
+            session.load(telemetry=True, weather=True, messages=True)
+            _ = session.laps
+        except Exception as e:
+            logging.error(f"Fatal error loading Monaco fallback: {e}")
+            return
         
     laps = session.laps
     
@@ -756,11 +766,11 @@ async def fastf1_live_bridge():
     race_name = get_upcoming_race()
     
     try:
-        logging.info("Loading track map for Monaco Grand Prix Practice 2...")
+        logging.info(f"Loading track map for {race_name} Qualifying...")
         session = None
         for year in [2026, 2025]:
             try:
-                session = fastf1.get_session(year, "Monaco Grand Prix", "Practice 2")
+                session = fastf1.get_session(year, race_name, "Qualifying")
                 session.load(telemetry=True, weather=False, messages=False)
                 break
             except:
@@ -806,28 +816,24 @@ async def fastf1_live_bridge():
         global_state["is_live"] = False
         asyncio.create_task(simulate_live_stream(race_name, global_track_map))
 
-async def health_check(path, request_headers):
+async def health_check(connection, request):
+    # Websockets 14+ process_request signature uses connection and request
+    path = request.path
+    request_headers = dict(request.headers)
     print(f"[HEALTH_CHECK] Incoming request: path={path}", flush=True)
-    print(f"[HEALTH_CHECK] Headers: {dict(request_headers)}", flush=True)
+    print(f"[HEALTH_CHECK] Headers: {request_headers}", flush=True)
     
     upgrade = request_headers.get("Upgrade", "")
-    connection = request_headers.get("Connection", "")
+    connection_header = request_headers.get("Connection", "")
     key = request_headers.get("Sec-WebSocket-Key", "")
-    version = request_headers.get("Sec-WebSocket-Version", "")
     
     # If a WebSocket key is present, force standard headers to bypass proxy stripping
     if key:
-        print("[HEALTH_CHECK] WebSocket handshake detected, normalizing Upgrade and Connection headers...", flush=True)
-        if "Connection" in request_headers:
-            del request_headers["Connection"]
-        if "Upgrade" in request_headers:
-            del request_headers["Upgrade"]
-        request_headers["Connection"] = "Upgrade"
-        request_headers["Upgrade"] = "websocket"
-
+        print("[HEALTH_CHECK] WebSocket handshake detected, bypassing header validation...", flush=True)
+        return None
         
-        # Log validation issues to stdout for debugging
-        if not any(token.strip() == "upgrade" for token in connection.lower().split(",")):
+    # Log validation issues to stdout for debugging
+    if not any(token.strip().lower() == "upgrade" for token in connection_header.split(",")):
             print(f"[HEALTH_CHECK] WARNING: Original Connection header did not contain 'upgrade': '{connection}'", flush=True)
         if upgrade.lower() != "websocket":
             print(f"[HEALTH_CHECK] WARNING: Original Upgrade header was not 'websocket': '{upgrade}'", flush=True)
